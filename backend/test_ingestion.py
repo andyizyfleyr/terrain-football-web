@@ -1,5 +1,6 @@
 """Contrôles hors réseau de la couche d'ingestion ESPN."""
 
+import json
 import os
 import sys
 from datetime import datetime, timezone
@@ -189,6 +190,109 @@ check("une équipe lue dans le classement", "10" in table, str(table))
 check("rang lu", table.get("10", {}).get("rank") == 11, str(table.get("10")))
 check("points lus", table.get("10", {}).get("points") == 14, str(table.get("10")))
 check("matchs joués lus", table.get("10", {}).get("played") == 11, str(table.get("10")))
+check(
+    "différence de buts lue (pointDifferential)",
+    table.get("10", {}).get("goalDifference") == 2,
+    str(table.get("10")),
+)
+
+print("4. Structures ESPN réelles (calendrier d'équipe, scoreboard de saison)")
+
+# Fixture conforme aux réponses ESPN observées : dans le calendrier
+# d'équipe le score est un objet, dans le scoreboard c'est un scalaire.
+TEAM_SCHEDULE_EVENT = {
+    "id": "401878760",
+    "date": "2026-11-07T15:00Z",
+    "status": {"type": {"state": "post", "completed": True}},
+    "competitions": [
+        {
+            "date": "2026-11-07T15:00Z",
+            "competitors": [
+                {
+                    "id": "359",
+                    "homeAway": "away",
+                    "score": {"value": 0.0, "displayValue": "0"},
+                    "team": {"id": "359", "displayName": "Arsenal", "abbreviation": "ARS"},
+                },
+                {
+                    "id": "306",
+                    "homeAway": "home",
+                    "score": {"value": 1.0, "displayValue": "1"},
+                    "team": {"id": "306", "displayName": "Hull City", "abbreviation": "HUL"},
+                },
+            ],
+        }
+    ],
+}
+
+SEASON_SCOREBOARD_EVENT = {
+    "id": "401878770",
+    "date": "2026-10-17T14:00Z",
+    "competitions": [
+        {
+            "date": "2026-10-17T14:00Z",
+            "status": {"type": {"state": "post", "completed": True}},
+            "competitors": [
+                {
+                    "id": "306",
+                    "homeAway": "home",
+                    "score": "1",
+                    "team": {"id": "306", "displayName": "Hull City", "abbreviation": "HUL"},
+                },
+                {
+                    "id": "368",
+                    "homeAway": "away",
+                    "score": "2",
+                    "team": {"id": "368", "displayName": "Everton", "abbreviation": "EVE"},
+                },
+            ],
+        }
+    ],
+}
+
+parsed_team = espn_module._parse_event(TEAM_SCHEDULE_EVENT)
+check("score lu dans le calendrier d'équipe", parsed_team and parsed_team["homeGoals"] == 1, str(parsed_team))
+check("score lu dans le scoreboard de saison", espn_module._parse_event(SEASON_SCOREBOARD_EVENT)["awayGoals"] == 2)
+
+not_completed = json.loads(json.dumps(TEAM_SCHEDULE_EVENT))
+not_completed["status"]["type"]["completed"] = False
+check("match non terminé ignoré", espn_module._parse_event(not_completed) is None)
+
+
+async def fake_schedule_ok(client, url):
+    if "/schedule" in url:
+        return {"events": [TEAM_SCHEDULE_EVENT]}
+    return {"events": [SEASON_SCOREBOARD_EVENT]}
+
+
+async def fake_schedule_ko(client, url):
+    if "/schedule" in url:
+        return None
+    return {"events": [SEASON_SCOREBOARD_EVENT]}
+
+
+async def run_schedule(fake):
+    espn_module.fetch_json = fake
+    espn_module.SEASON_CACHE.clear()
+    try:
+        return await espn_module.fetch_team_schedule(None, "eng.1", "306", KICKOFF)
+    finally:
+        espn_module.fetch_json = original_fetch
+        espn_module.SEASON_CACHE.clear()
+
+
+history_direct = asyncio.run(run_schedule(fake_schedule_ok))
+check("calendrier d'équipe exploité", len(history_direct) == 1, str(history_direct))
+check("buts du calendrier d'équipe corrects", history_direct and history_direct[0]["homeGoals"] == 1, str(history_direct))
+
+history_fallback = asyncio.run(run_schedule(fake_schedule_ko))
+check("repli sur le scoreboard de saison", len(history_fallback) == 1, str(history_fallback))
+check("équipe filtrée dans le repli", history_fallback and history_fallback[0]["homeId"] == "306", str(history_fallback))
+
+form_fallback = select_form(history_fallback, "306", KICKOFF)
+check("forme calculée depuis le repli", len(form_fallback) == 1, str(form_fallback))
+detail_fallback = _form_detail(form_fallback, "306")
+check("détail de forme cohérent", detail_fallback and detail_fallback[0]["gf"] == 1 and detail_fallback[0]["res"] == "D", str(detail_fallback))
 
 print("")
 if failures:

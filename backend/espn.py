@@ -26,6 +26,8 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+import time
+
 import httpx
 
 ESPN_BASE = "https://site.api.espn.com/apis"
@@ -48,14 +50,25 @@ def _client() -> httpx.AsyncClient:
     )
 
 
+FETCH_LOG: List[Dict[str, Any]] = []
+
+
+def _log_fetch(url: str, status: Optional[int], error: Optional[str] = None) -> None:
+    """Trace les derniers appels ESPN (diagnostic de bout en bout)."""
+    FETCH_LOG.append({"url": url, "status": status, "error": error})
+    del FETCH_LOG[:-40]
+
+
 async def fetch_json(client: httpx.AsyncClient, url: str) -> Optional[Any]:
-    """GET JSON tolérant : toute erreur réseau renvoie None."""
+    """GET JSON tolérant : toute erreur réseau renvoie None (et est tracée)."""
     try:
         response = await client.get(url)
         if response.status_code != 200:
+            _log_fetch(url, response.status_code)
             return None
         return response.json()
-    except Exception:
+    except Exception as exc:
+        _log_fetch(url, None, f"{type(exc).__name__}: {exc}")
         return None
 
 
@@ -174,43 +187,109 @@ async def fetch_day_matches(
 # Forme récente (schedule d'équipe)
 # --------------------------------------------------------------------------
 
-async def fetch_team_schedule(
-    client: httpx.AsyncClient, league: str, team_id: str
+def _event_completed(event: Dict[str, Any], competition: Dict[str, Any]) -> bool:
+    """Le statut « terminé » vit au niveau de l'event ou de la competition."""
+    for holder in (event, competition):
+        status = (holder.get("status") or {}).get("type") or {}
+        if status.get("completed"):
+            return True
+    return False
+
+
+def _parse_event(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Normalise un evenement ESPN (calendrier d'equipe ou scoreboard)."""
+    competitions = event.get("competitions") or []
+    if not competitions:
+        return None
+    competition = competitions[0]
+    sides = _competitors(competition)
+    if "home" not in sides or "away" not in sides:
+        return None
+    if not _event_completed(event, competition):
+        return None
+    home = _team_side(sides["home"])
+    away = _team_side(sides["away"])
+    return {
+        "id": str(event.get("id", "")),
+        "date": event.get("date"),
+        "homeId": home["id"],
+        "homeName": home["name"],
+        "awayId": away["id"],
+        "awayName": away["name"],
+        "homeGoals": home["score"],
+        "awayGoals": away["score"],
+    }
+
+
+SEASON_CACHE: Dict[str, Dict[str, Any]] = {}
+SEASON_CACHE_TTL = 600.0
+
+
+async def fetch_league_season(
+    client: httpx.AsyncClient, league: str, year: int
 ) -> List[Dict[str, Any]]:
-    """Historique d'une équipe : chaque match avec son score et son terrain."""
+    """Tous les matchs joues d'une annee civile : un seul appel ESPN.
+
+    Sert de repli quand le calendrier d'equipe n'est pas disponible
+    (reponse trop lourde ou refusee) : la charge reseau reste la meme
+    pour toute la journee.
+    """
+    key = f"{league}:{year}"
+    cached = SEASON_CACHE.get(key)
+    now = time.time()
+    if cached and now - cached["at"] < SEASON_CACHE_TTL:
+        return cached["events"]
+
+    url = f"{ESPN_BASE}/site/v2/sports/soccer/{league}/scoreboard?dates={year}&limit=400"
+    payload = await fetch_json(client, url)
+    events: List[Dict[str, Any]] = []
+    seen: set = set()
+    for event in (payload or {}).get("events") or []:
+        parsed = _parse_event(event)
+        if parsed and parsed["id"] not in seen:
+            seen.add(parsed["id"])
+            events.append(parsed)
+    events.sort(key=lambda m: m.get("date") or "")
+    SEASON_CACHE[key] = {"at": now, "events": events}
+    return events
+
+
+async def fetch_team_schedule(
+    client: httpx.AsyncClient,
+    league: str,
+    team_id: str,
+    kickoff: Optional[datetime] = None,
+) -> List[Dict[str, Any]]:
+    """Historique d'une equipe : chaque match avec son score et son terrain.
+
+    Source primaire : le calendrier d'equipe ESPN. Si cet appel echoue
+    (reponse lourde ou refusee), repli sur le scoreboard de la saison,
+    filtré sur l'equipe concernee.
+    """
     if not team_id:
         return []
+
     url = f"{ESPN_BASE}/site/v2/sports/soccer/{league}/teams/{team_id}/schedule"
     payload = await fetch_json(client, url)
-    if not payload:
-        return []
-
     history: List[Dict[str, Any]] = []
-    for event in payload.get("events", []) or []:
-        competitions = event.get("competitions") or []
-        if not competitions:
-            continue
-        competition = competitions[0]
-        sides = _competitors(competition)
-        if "home" not in sides or "away" not in sides:
-            continue
-        status = (event.get("status") or {}).get("type") or {}
-        if not status.get("completed"):
-            continue
-        home = _team_side(sides["home"])
-        away = _team_side(sides["away"])
-        history.append(
-            {
-                "id": str(event.get("id", "")),
-                "date": event.get("date"),
-                "homeId": home["id"],
-                "homeName": home["name"],
-                "awayId": away["id"],
-                "awayName": away["name"],
-                "homeGoals": _int(home.get("score")),
-                "awayGoals": _int(away.get("score")),
-            }
-        )
+    for event in (payload or {}).get("events") or []:
+        parsed = _parse_event(event)
+        if parsed:
+            history.append(parsed)
+
+    if not history:
+        years = [kickoff.year] if kickoff else [datetime.now(timezone.utc).year]
+        if kickoff and (kickoff - timedelta(days=FORM_WINDOW_DAYS)).year != kickoff.year:
+            years.append((kickoff - timedelta(days=FORM_WINDOW_DAYS)).year)
+        season: List[Dict[str, Any]] = []
+        for year in years:
+            season.extend(await fetch_league_season(client, league, year))
+        history = [
+            match
+            for match in season
+            if match["homeId"] == str(team_id) or match["awayId"] == str(team_id)
+        ]
+
     history.sort(key=lambda m: m.get("date") or "")
     return history
 
@@ -428,7 +507,11 @@ async def fetch_standings(
                 "rank": int(values.get("rank") or 0),
                 "points": int(values.get("points") or 0),
                 "played": int(values.get("gamesPlayed") or 0),
-                "goalDifference": int(values.get("goalDifference") or 0),
+                # ESPN nomme la difference de buts « pointDifferential »
+                # (« goalDifference » est conserve pour compatibilite).
+                "goalDifference": int(
+                    values.get("pointDifferential", values.get("goalDifference")) or 0
+                ),
             }
     return table
 
@@ -440,7 +523,7 @@ def _stake_label(rank: int, teams: int) -> str:
     if position <= 0.2:
         return "Course au titre / places européennes"
     if position <= 0.45:
-        return " places européennes"
+        return "Course europeenne"
     if position <= 0.75:
         return "Enjeu moyen (points importants)"
     return "Survie en jeu — pression maximale"
@@ -520,8 +603,8 @@ async def build_base_match(
     home_id = match["home"]["id"]
     away_id = match["away"]["id"]
 
-    home_history = await fetch_team_schedule(client, league, home_id)
-    away_history = await fetch_team_schedule(client, league, away_id)
+    home_history = await fetch_team_schedule(client, league, home_id, kickoff)
+    away_history = await fetch_team_schedule(client, league, away_id, kickoff)
 
     home_form = select_form(home_history, home_id, kickoff)
     away_form = select_form(away_history, away_id, kickoff)
