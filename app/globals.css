@@ -126,3 +126,185 @@
   .squadQuickCols>div+div{padding-left:0;padding-top:7px;border-left:0;border-top:1px solid #e6eee8}
   .xgRealSummary{padding-left:0;border-left:0}
 }
+
+/* ================================================================== */
+/* LOADER D'ANALYSE IA — 10 SECONDES                                  */
+/* ================================================================== */
+.aiLoader{position:relative;margin:16px 19px 19px;padding:20px 20px 16px;overflow:hidden;border-radius:14px;color:#e7f2ea;background:linear-gradient(155deg,#0d2418,#123a26 58%,#0a1d13);box-shadow:0 18px 44px #0b241733,inset 0 0 0 1px #ffffff12}
+.aiLoaderGlow{position:absolute;top:-120px;right:-60px;width:340px;height:340px;border-radius:50%;background:radial-gradient(circle,#3ad07e30,transparent 68%);pointer-events:none;animation:aiGlow 3.4s ease-in-out infinite}
+@keyframes aiGlow{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(1.14);opacity:1}}
+.aiLoaderHead{position:relative;display:flex;align-items:center;gap:12px}
+.aiLoaderPulse{position:relative;width:38px;height:38px;display:grid;place-items:center;flex:none;border-radius:50%;background:#ffffff0f;box-shadow:inset 0 0 0 1px #ffffff1c}
+.aiLoaderPulse:before,.aiLoaderPulse:after{position:absolute;inset:0;border-radius:50%;border:1px solid #52e39a;content:'';animation:aiPing 1.9s ease-out infinite}
+.aiLoaderPulse:after{animation-delay:.95s}
+.aiLoaderPulse i{width:11px;height:11px;border-radius:50%;background:#5ceaa4;box-shadow:0 0 14px #5ceaa4cc;animation:aiCore 1.15s ease-in-out infinite}
+@keyframes aiPing{0%{transform:scale(.72);opacity:.9}100%{transform:scale(1.5);opacity:0}}
+@keyframes aiCore{0%,100%{transform:scale(1)}50%{transform:scale(1.35)}}
+.aiLoaderHead>div{flex:1;min-width:0}
+.aiLoaderHead b{display:block;font-size:14px;letter-spacing:2.1px;font-weight:800}
+.aiLoaderHead small{display:block;margin-top:3px;color:#8fbda1;font:500 8.5px 'DM Mono',monospace;letter-spacing:.85px}
+.aiLoaderPct{flex:none;padding:7px 10px;border-radius:8px;background:#ffffff12;color:#9ff0c2;font:700 15px 'DM Mono',monospace;letter-spacing:.5px}
+.aiLoaderTeams{position:relative;display:flex;align-items:center;justify-content:center;gap:16px;margin:18px 0 14px}
+.aiLoaderTeam{display:flex;align-items:center;gap:9px;min-width:0}
+.aiLoaderTeam .teamBadge{border-color:#ffffff26;background:#ffffff12}
+.aiLoaderTeam b{font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px}
+.aiLoaderVersus{padding:4px 9px;border-radius:999px;background:#ffffff10;color:#7fae91;font:600 8.5px 'DM Mono',monospace;letter-spacing:1px}
+.aiLoaderBar{position:relative;height:6px;overflow:hidden;border-radius:999px;background:#ffffff12}
+.aiLoaderBar i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#2ea86a,#6ff0ab);box-shadow:0 0 16px #4ce39a80;transition:width .18s linear}
+.aiLoaderSteps{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:5px 14px;margin-top:16px}
+.aiLoaderStep{display:flex;align-items:flex-start;gap:8px;padding:5px 7px;border-radius:7px;opacity:.42;transition:opacity .3s,background .3s}
+.aiLoaderStep b{display:block;font-size:10px;font-weight:600;line-height:1.35}
+.aiLoaderStep small{display:block;margin-top:2px;color:#87b39a;font-size:8px;line-height:1.35}
+.aiLoaderStepIcon{width:15px;height:15px;display:grid;place-items:center;flex:none;margin-top:1px;border-radius:50%;background:#ffffff12;color:#8fbd9f;font:700 8px 'DM Mono',monospace}
+.aiLoaderStepDone{opacity:.85}
+.aiLoaderStepDone .aiLoaderStepIcon{background:#2ea86a;color:#06231a}
+.aiLoaderStepActive{opacity:1;background:#ffffff0e;box-shadow:inset 0 0 0 1px #ffffff14}
+.aiLoaderStepActive .aiLoaderStepIcon{background:#6ff0ab;color:#06231a;animation:aiBlink 1s ease-in-out infinite}
+@keyframes aiBlink{0%,100%{box-shadow:0 0 0 0 #6ff0ab66}50%{box-shadow:0 0 0 5px #6ff0ab00}}
+.aiLoaderTelemetry{position:relative;display:flex;flex-wrap:wrap;gap:6px;margin-top:15px}
+.aiLoaderChip{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border:1px solid #ffffff14;border-radius:7px;background:#ffffff0a}
+.aiLoaderChip small{color:#7fae91;font:600 7.5px 'DM Mono',monospace;letter-spacing:.7px}
+.aiLoaderChip b{color:#cfe9da;font:700 10px 'DM Mono',monospace}
+.aiLoaderChipReady{border-color:#3ad07e55;background:#2ea86a22}
+.aiLoaderChipReady b{color:#8ff0bb}
+.aiLoaderFoot{position:relative;margin:13px 0 0;color:#7fae91;font-size:9px;line-height:1.5}
+
+/* ================================================================== */
+/* BANDEAU ANALYSTE IA (vue d'ensemble)                               */
+/* ================================================================== */
+.analystStrip{display:grid;grid-template-columns:118px minmax(0,1fr) auto;align-items:center;gap:14px;margin:0 19px 13px;padding:13px;border:1px solid #dbe9df;border-radius:12px;background:linear-gradient(120deg,#f3f9f5,#fbfdfb 72%)}
+.analystStripScore{text-align:center;padding-right:12px;border-right:1px solid #e4ece6}
+.analystStripScore>span{display:block;color:#8b9890;font:600 7.5px 'DM Mono',monospace;letter-spacing:.8px}
+.analystStripScore>b{display:block;margin:5px 0 3px;color:var(--green);font:800 30px 'DM Mono',monospace;line-height:1}
+.analystStripScore>b small{color:#93a199;font-size:11px}
+.analystStripScore>em{display:inline-block;padding:3px 8px;border-radius:999px;background:#e6f3ea;color:#2f6f4b;font:600 8.5px 'DM Sans',sans-serif;font-style:normal}
+.analystStripBody b{display:block;margin:3px 0 4px;color:#2a3d31;font-size:12px;line-height:1.4}
+.analystStripBody p{margin:0;color:#6f7d73;font-size:9.5px;line-height:1.5}
+.analystStripMeta{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.analystStripMeta span{padding:3px 7px;border-radius:5px;background:#eef6f0;color:#3a7450;font:500 8px 'DM Mono',monospace}
+.analystStrip>button{border:1px solid #d7e9dc;border-radius:8px;background:#fff;color:#2f7a4c;font:600 10px 'DM Sans',sans-serif;padding:9px 12px;cursor:pointer;white-space:nowrap;transition:all .15s}
+.analystStrip>button:hover{background:#e9f6ee;border-color:#b6d9c2}
+
+/* ================================================================== */
+/* RAPPORT ANALYSTE IA                                                */
+/* ================================================================== */
+.analystArea{padding:17px 19px 4px}
+.analystEmpty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:40px 20px;text-align:center;color:#939e96;font-size:10px;line-height:1.5}
+.analystEmpty b{color:#52665a;font-size:12px}
+.analystEmpty p{max-width:340px;margin:0}
+.analystVerdict{display:grid;grid-template-columns:200px minmax(0,1fr);gap:18px;padding:16px;border:1px solid #dce9df;border-radius:13px;background:linear-gradient(135deg,#f2f8f4,#fcfdfc 70%);margin-bottom:16px}
+.analystConfidence{padding:15px;border:1px solid #dce9df;border-radius:11px;background:#fff;text-align:center}
+.analystConfidence>span{display:block;color:#849389;font:600 7.5px 'DM Mono',monospace;letter-spacing:.9px}
+.analystConfidence>b{display:block;margin:8px 0 4px;color:var(--green);font:800 42px 'DM Mono',monospace;line-height:1}
+.analystConfidence>b small{color:#94a098;font-size:12px}
+.analystConfidence>strong{display:inline-block;padding:4px 11px;border-radius:999px;background:#e9f5ec;color:#2f7149;font:600 9.5px 'DM Sans',sans-serif}
+.analystGauge{height:5px;margin:12px 0 8px;overflow:hidden;border-radius:999px;background:#e9efea}
+.analystGauge i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#1f8a55,#6cd39a)}
+.analystConfidence p{margin:0;color:#8a958d;font-size:8.5px;line-height:1.5}
+.analystVerdictBody h3{margin:5px 0 9px;font-size:16px;letter-spacing:-.3px;line-height:1.35}
+.analystBullets{margin:0;padding-left:16px;display:grid;gap:5px}
+.analystBullets li{color:#54655a;font-size:10px;line-height:1.55}
+.analystVerdictText{margin:11px 0 0;padding-top:9px;border-top:1px solid #e4ebe5;color:#77857c;font-size:9.5px;line-height:1.55}
+.analystBlock{margin-bottom:20px}
+.analystEdgeTable{border:1px solid #e6ece7;border-radius:11px;overflow:hidden;background:#fff}
+.analystEdgeHead,.analystEdgeRow{display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr 1fr;gap:8px;align-items:center;padding:9px 12px}
+.analystEdgeHead{border-bottom:1px solid #e9eeea;background:#f7faf8;color:#93a099;font:600 8px 'DM Mono',monospace;letter-spacing:.7px}
+.analystEdgeRow{border-bottom:1px solid #f1f4f1}
+.analystEdgeRow:last-of-type{border-bottom:0}
+.analystEdgeRow>span{color:#55665b;font-size:10px}
+.analystEdgeRow>b{color:#31473a;font:600 10px 'DM Mono',monospace}
+.analystEdgeRow>b.analystEdgeCalib{color:var(--green)}
+.analystEdgeRow>em{font:700 10px 'DM Mono',monospace;font-style:normal}
+.analystEdgeRow>em.edgePos{color:#1d8b56}
+.analystEdgeRow>em.edgeNeg{color:#b1603f}
+.analystEdgeFoot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:9px 12px;border-top:1px solid #e9eeea;background:#fafcfa;color:#8a968e;font-size:8.5px}
+.analystValueBanner{display:flex;align-items:center;gap:9px;margin-top:9px;padding:10px 12px;border:1px solid #cfe7d6;border-radius:10px;background:#eef8f1;color:#1f6b43}
+.analystValueBanner b{font-size:10.5px}
+.analystValueBanner em{margin-left:auto;font:700 10px 'DM Mono',monospace;font-style:normal}
+.analystModuleGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.analystModuleCard{padding:12px;border:1px solid #e6ece7;border-radius:11px;background:#fff;transition:transform .15s,box-shadow .15s}
+.analystModuleCard:hover{transform:translateY(-2px);box-shadow:0 7px 18px #173e2610}
+.analystModuleHead{display:flex;align-items:center;gap:7px;margin-bottom:7px}
+.analystModuleHead>span{padding:3px 6px;border-radius:5px;background:#eaf5ed;color:var(--green);font:700 9px 'DM Mono',monospace}
+.analystModuleHead>b{flex:1;font-size:10px;line-height:1.3}
+.analystStatus{padding:2px 6px;border-radius:999px;font:600 7.5px 'DM Mono',monospace;font-style:normal;white-space:nowrap}
+.analystStatusok{background:#e7f5ec;color:#2b7a4f}
+.analystStatuspartial{background:#fdf3e0;color:#9a7326}
+.analystStatusunavailable{background:#f1f3f1;color:#7d8a81}
+.analystModuleSummary{margin:0;color:#5d6c62;font-size:9px;line-height:1.5}
+.analystModuleMetrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:9px;padding-top:8px;border-top:1px solid #eef1ee}
+.analystModuleMetrics small{display:block;color:#98a29c;font:500 7.5px 'DM Mono',monospace;letter-spacing:.4px}
+.analystModuleMetrics b{display:block;margin-top:3px;color:#2f4b39;font:700 11px 'DM Mono',monospace}
+.analystTwoCol{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:12px}
+.analystMiniTable{border:1px solid #e6ece7;border-radius:11px;overflow:hidden;background:#fff}
+.analystMiniHead,.analystMiniTable>div:not(.analystMiniHead){display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:8px;padding:7px 11px}
+.analystMiniHead{border-bottom:1px solid #e9eeea;background:#f7faf8;color:#93a099;font:600 8px 'DM Mono',monospace;letter-spacing:.6px}
+.analystMiniTable>div:not(.analystMiniHead){border-bottom:1px solid #f2f4f2}
+.analystMiniTable>div:last-child{border-bottom:0}
+.analystMiniTable>div:not(.analystMiniHead)>span{color:#65736a;font-size:9.5px}
+.analystMiniTable>div:not(.analystMiniHead)>b{color:#31473a;font:600 9.5px 'DM Mono',monospace;text-align:right}
+.analystKeeperBox{padding:12px;border:1px solid #e6ece7;border-radius:11px;background:#fff}
+.analystKeeper{margin-top:9px;padding:9px;border-radius:9px;background:#f7faf8}
+.analystKeeper b{display:block;color:#2b4234;font-size:10.5px}
+.analystKeeper small{display:block;margin-top:3px;color:#7e8c83;font-size:9px}
+.analystKeeper em{display:inline-block;margin-top:6px;padding:2px 7px;border-radius:999px;background:#e7f4ec;color:#2b7a4f;font:700 8.5px 'DM Mono',monospace;font-style:normal}
+.analystKeeperNote{margin:10px 0 0;color:#94a098;font-size:8.5px;line-height:1.5}
+.analystContextBox{padding:12px;border:1px solid #e6ece7;border-radius:11px;background:#fff;display:flex;flex-direction:column;gap:9px}
+.analystContextRow b{display:block;color:#3d5347;font-size:9.5px}
+.analystContextRow span{display:block;margin-top:3px;color:#75837a;font-size:9px;line-height:1.5}
+.analystTacticalRow{display:grid;grid-template-columns:1fr 180px 1fr;gap:10px}
+.analystTacticalCard{padding:12px;border:1px solid #e6ece7;border-radius:11px;background:#fff}
+.analystTacticalCard>b{display:block;color:#8b9790;font:600 8px 'DM Mono',monospace;letter-spacing:.7px}
+.analystTacticalCard strong{display:block;margin:5px 0 5px;color:#28402f;font-size:12px}
+.analystTacticalCard small{display:block;color:#748279;font-size:9px;line-height:1.5}
+.analystTacticalCard em{display:inline-block;margin-top:8px;padding:2px 7px;border-radius:999px;background:#eef6f0;color:#2f6f4b;font:700 8.5px 'DM Mono',monospace;font-style:normal}
+.analystTacticalMid{text-align:center;background:linear-gradient(150deg,#f2f8f4,#fbfdfb)}
+.analystTacticalMid span{display:block;color:#7f8d84;font:600 8px 'DM Mono',monospace;letter-spacing:.6px}
+.analystTacticalMid b{display:block;margin:6px 0;color:var(--green);font:800 24px 'DM Mono',monospace}
+.analystEffectList{margin:10px 0 0;padding-left:16px;display:grid;gap:5px}
+.analystEffectList li{color:#5c6b61;font-size:9.5px;line-height:1.5}
+.analystAbsenceCol{padding:12px;border:1px solid #e6ece7;border-radius:11px;background:#fff}
+.analystAbsenceCol>b{display:block;color:#2d4334;font-size:11px}
+.analystAbsenceCol>span{display:block;margin-top:4px;color:#7c8a81;font-size:9px}
+.analystAbsenceCol ul{margin:9px 0 0;padding:0;list-style:none;display:grid;gap:6px}
+.analystAbsenceCol li{padding:7px 9px;border-radius:8px;background:#f8faf9}
+.analystAbsenceCol li.absenceLong{background:#f3f5f3}
+.analystAbsenceCol li b{display:block;color:#33473a;font-size:9.5px}
+.analystAbsenceCol li small{display:block;margin-top:2px;color:#8a968e;font-size:8px}
+.analystAbsenceCol li em{display:block;margin-top:2px;color:#9aa49e;font:500 8px 'DM Mono',monospace;font-style:normal}
+.analystSimGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+.analystSimCard{padding:12px;border:1px solid #e6ece7;border-radius:11px;background:#fff;text-align:center}
+.analystSimCard small{display:block;color:#8e9a92;font:600 7.5px 'DM Mono',monospace;letter-spacing:.7px}
+.analystSimCard b{display:block;margin-top:6px;color:var(--green);font:800 21px 'DM Mono',monospace}
+.analystScenarios{margin-top:11px;display:grid;gap:7px}
+.analystScenarios>div{display:grid;grid-template-columns:190px minmax(0,1fr) 48px;gap:10px;align-items:center}
+.analystScenarios span{color:#5f6e64;font-size:9.5px}
+.analystScenarioTrack{height:5px;overflow:hidden;border-radius:999px;background:#edf1ed}
+.analystScenarioTrack i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#1f8a55,#79d7a4)}
+.analystScenarios b{color:#31473a;font:700 9.5px 'DM Mono',monospace;text-align:right}
+.analystScoreChips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.analystScoreChips span{min-width:52px;padding:7px;border-radius:7px;background:#f2f8f4;text-align:center}
+.analystScoreChips b{display:block;color:#2d5c40;font:700 11px 'DM Mono',monospace}
+.analystScoreChips small{display:block;margin-top:2px;color:#8c9991;font:600 8px 'DM Mono',monospace}
+
+@media(max-width:900px){
+  .analystVerdict{grid-template-columns:1fr}
+  .analystTwoCol{grid-template-columns:1fr}
+  .analystModuleGrid{grid-template-columns:1fr}
+  .analystTacticalRow{grid-template-columns:1fr}
+  .analystSimGrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .analystStrip{grid-template-columns:1fr}
+  .analystStripScore{border-right:0;border-bottom:1px solid #e4ece6;padding:0 0 10px}
+}
+@media(max-width:760px){
+  .aiLoader{margin-left:14px;margin-right:14px;padding:16px 14px 13px}
+  .aiLoaderSteps{grid-template-columns:1fr}
+  .analystStrip{margin-left:14px;margin-right:14px}
+  .analystArea{padding:15px 14px 4px}
+  .analystEdgeHead,.analystEdgeRow{grid-template-columns:1.4fr 1fr 1fr;row-gap:4px}
+  .analystEdgeHead span:nth-child(4),.analystEdgeHead span:nth-child(5){display:none}
+  .analystEdgeRow b:nth-child(4){display:none}
+  .analystEdgeRow em{grid-column:2 / 4;text-align:right}
+  .analystScenarios>div{grid-template-columns:1fr 42px}
+  .analystScenarios span{grid-column:1 / 3}
+}
