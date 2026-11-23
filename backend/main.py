@@ -121,7 +121,10 @@ async def debug_espn(league: str = "eng.1", team: str = "306") -> JSONResponse:
     report = {}
     async with _client() as client:
         for label, url in (
-            ("schedule", f"{ESPN_BASE}/site/v2/sports/soccer/{league}/teams/{team}/schedule"),
+            (
+                "schedule",
+                f"{ESPN_BASE}/site/v2/sports/soccer/{league}/teams/{team}/schedule?season=2026",
+            ),
             ("scoreboard", f"{ESPN_BASE}/site/v2/sports/soccer/{league}/scoreboard?dates=20261122"),
             ("standings", f"{ESPN_BASE}/v2/sports/soccer/{league}/standings"),
         ):
@@ -135,10 +138,9 @@ async def debug_espn(league: str = "eng.1", team: str = "306") -> JSONResponse:
                     entry["keys"] = sorted(list(payload.keys())[:12])
                     events = payload.get("events") or []
                     entry["events"] = len(events)
-                    completed = [
-                        e for e in events
-                        if ((e.get("status") or {}).get("type") or {}).get("completed")
-                    ]
+                    from espn import _parse_event
+
+                    completed = [e for e in events if _parse_event(e)]
                     entry["completed"] = len(completed)
                     if completed:
                         comps = (completed[0].get("competitions") or [{}])[0]
