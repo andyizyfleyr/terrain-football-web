@@ -519,18 +519,8 @@ export function MatchAnalysisPanel({
                       <small>BTTS · match entier</small>
                     </div>
                   </div>
-                  <div className="bttsGrid">
-                    <div>
-                      <small>OUI</small>
-                      <b>{pct(probabilities.bttsYes)}</b>
-                      <i style={{ width: `${(probabilities.bttsYes || 0) * 100}%` }} />
-                    </div>
-                    <div>
-                      <small>NON</small>
-                      <b>{pct(probabilities.bttsNo)}</b>
-                      <i style={{ width: `${(probabilities.bttsNo || 0) * 100}%` }} />
-                    </div>
-                  </div>
+                  <ProbBar label="Oui · les deux équipes marquent" value={probabilities.bttsYes} />
+                  <ProbBar label="Non · une équipe muette" value={probabilities.bttsNo} color="var(--blue)" />
                 </article>
 
                 <article className="predictionCard">
@@ -541,23 +531,10 @@ export function MatchAnalysisPanel({
                       <small>Plus / moins · match entier</small>
                     </div>
                   </div>
-                  <div className="totalsTable">
-                    <div>
-                      <span>SEUIL</span>
-                      <span>PLUS</span>
-                      <span>MOINS</span>
-                    </div>
-                    {[
-                      ['1,5', probabilities.over15, probabilities.under15],
-                      ['2,5', probabilities.over25, probabilities.under25],
-                    ].map(row => (
-                      <div key={row[0]}>
-                        <b>{row[0]}</b>
-                        <strong>{pct(row[1])}</strong>
-                        <strong>{pct(row[2])}</strong>
-                      </div>
-                    ))}
-                  </div>
+                  <ProbBar label="Plus de 1,5 buts" value={probabilities.over15} />
+                  <ProbBar label="Moins de 1,5 buts" value={probabilities.under15} color="var(--blue)" />
+                  <ProbBar label="Plus de 2,5 buts" value={probabilities.over25} />
+                  <ProbBar label="Moins de 2,5 buts" value={probabilities.under25} color="var(--blue)" />
                 </article>
 
                 <article className="predictionCard">
@@ -568,16 +545,9 @@ export function MatchAnalysisPanel({
                       <small>Estimations du modèle</small>
                     </div>
                   </div>
-                  <div className="scoreChips">
-                    {(analysis.topScores || []).slice(0, 5).map((score: any) => (
-                      <span key={`${score.h}-${score.a}`}>
-                        <b>
-                          {score.h}–{score.a}
-                        </b>
-                        <small>{pct(score.p)}</small>
-                      </span>
-                    ))}
-                  </div>
+                  {(analysis.topScores || []).slice(0, 5).map((score: any) => (
+                    <ProbBar key={`${score.h}-${score.a}`} label={`${score.h} – ${score.a}`} value={score.p} />
+                  ))}
                 </article>
 
                 <article className="predictionCard fullPrediction">
@@ -588,24 +558,26 @@ export function MatchAnalysisPanel({
                       <small>Probabilités par mi-temps</small>
                     </div>
                   </div>
-                  <div className="halfTable">
-                    <div>
-                      <span>PÉRIODE</span>
-                      <span>SEUIL</span>
-                      <span>PLUS</span>
-                      <span>MOINS</span>
-                    </div>
+                  <div className="periodRows">
                     {[
-                      ['1re mi-temps', '1,5', probabilities.firstHalf?.over15],
-                      ['1re mi-temps', '2,5', probabilities.firstHalf?.over25],
-                      ['2e mi-temps', '1,5', probabilities.secondHalf?.over15],
-                      ['2e mi-temps', '2,5', probabilities.secondHalf?.over25],
-                    ].map((row, index) => (
-                      <div key={index}>
-                        <span>{row[0]}</span>
-                        <b>{row[1]}</b>
-                        <strong>{pct(row[2])}</strong>
-                        <strong>{pct(typeof row[2] === 'number' ? 1 - row[2] : undefined)}</strong>
+                      ['1re mi-temps', probabilities.firstHalf],
+                      ['2e mi-temps', probabilities.secondHalf],
+                    ].map(([label, period]: any) => (
+                      <div className="periodGroup" key={label}>
+                        <span className="periodGroupLabel">{label}</span>
+                        {[
+                          ['1,5', period?.over15],
+                          ['2,5', period?.over25],
+                        ].map(([line, value]: any) => (
+                          <div key={line}>
+                            <ProbBar label={`Plus de ${line} buts`} value={value} />
+                            <ProbBar
+                              label={`Moins de ${line} buts`}
+                              value={typeof value === 'number' ? 1 - value : undefined}
+                              color="var(--blue)"
+                            />
+                          </div>
+                        ))}
                       </div>
                     ))}
                   </div>
