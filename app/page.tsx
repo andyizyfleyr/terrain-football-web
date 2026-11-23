@@ -1,13 +1,14 @@
 'use client';
 
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MatchAnalysisPanel, TeamBadge } from './components/MatchAnalysisPanel';
+import { MatchAnalysisPanel } from './components/MatchAnalysisPanel';
+import { MatchCard } from './components/MatchCard';
 import {
   buildMatchUrl,
   cachedLeagues,
   clearResumeScrollOnly,
+  dayHeading,
   DayEvents,
   Fixture,
   isFixtureFinished,
@@ -22,7 +23,6 @@ import {
   setCachedLeagues,
   shortDate,
   StatusTab,
-  timeOf,
   todayKey,
 } from './lib/terrain';
 
@@ -235,6 +235,17 @@ export default function Home() {
     });
   }, [monthFixtures, statusTab, search]);
 
+  // Regroupement par journée pour les en-têtes de section
+  const groupedDays = useMemo(() => {
+    const map = new Map<string, MonthFixture[]>();
+    for (const item of visibleFixtures) {
+      const list = map.get(item.dayKey);
+      if (list) list.push(item);
+      else map.set(item.dayKey, [item]);
+    }
+    return Array.from(map.entries()).map(([dayKey, items]) => ({ dayKey, items }));
+  }, [visibleFixtures]);
+
   // 5. Restauration de la position de scroll et mise en évidence de la carte cliquée
   useEffect(() => {
     if (!hydrated || monthLoading || !pendingRestoreRef.current) return;
@@ -382,9 +393,6 @@ export default function Home() {
             Rencontres
           </a>
         </nav>
-        <div className="dataStatus">
-          <span className="statusPulse" /> Flux en direct
-        </div>
       </header>
 
       <section className="appHero" id="top">
@@ -392,18 +400,18 @@ export default function Home() {
           <div className="eyebrow">
             <span /> CENTRE DE MATCHS · SAISON EN COURS
           </div>
-          <h1>
+          <p className="heroHeadline">
             Le calendrier,
             <br />
             <em>en un coup d’œil.</em>
-          </h1>
+          </p>
           <p>
             Choisissez une compétition, parcourez tous les matchs du mois sous forme de cartes, puis ouvrez une rencontre pour consulter
             son analyse complète.
           </p>
           <div className="heroStats">
             <span>
-              <b>08</b> facteurs examinés
+              <b>08</b> modules d’analyse
             </span>
             <span>
               <b>16</b> compétitions
@@ -472,7 +480,7 @@ export default function Home() {
             <span className="sectionKicker">
               {currentLeagueName.toUpperCase()} · {monthLabel(month).toUpperCase()}
             </span>
-            <h2>Tous les matchs du mois</h2>
+            <h1>Tous les matchs du mois</h1>
             <p>
               {calendarError ? (
                 <span className="inlineError">{calendarError}</span>
@@ -543,58 +551,30 @@ export default function Home() {
         {monthFixtures.length > 0 ? (
           <>
             {visibleFixtures.length > 0 ? (
-              <div className="monthCardsGrid">
-                {visibleFixtures.map((item, index) => {
-                  const score = screenedScores[item.id];
-                  const finished = isFixtureFinished(item);
-                  const isLastVisited = lastMatchId === item.id;
-                  const matchHref = buildMatchUrl(league, item.dayKey, item.id);
-
-                  return (
-                    <Link
-                      key={`${item.dayKey}-${item.id}`}
-                      id={`match-card-${item.id}`}
-                      href={matchHref}
-                      prefetch={false}
-                      className={`matchCard monthMatchCard ${isLastVisited ? 'matchResumed' : ''}`}
-                      onClick={e => handleOpenMatch(e, item)}
-                    >
-                      <span className="matchCardTop">
-                        <span className="matchOrdinal">{String(index + 1).padStart(2, '0')}</span>
-                        <span className="matchDatePill">{shortDate(item.dayKey)}</span>
-                        <span>{timeOf(item.date)} · COT</span>
-                        {finished ? (
-                          <span className="cardStateTag stateDone">Terminé</span>
-                        ) : (
-                          <span className="cardStateTag stateUpcoming">À venir</span>
-                        )}
-                        {score && (
-                          <span className={`riskBadge ${score.score >= 30 ? 'riskHigh' : ''}`} title={`Signal exploratoire : ${score.level}`}>
-                            Vigilance {score.score}
-                          </span>
-                        )}
+              <div className="dayGroups">
+                {groupedDays.map(group => (
+                  <section className="dayGroup" key={group.dayKey}>
+                    <header className="dayGroupHead">
+                      <b>{dayHeading(group.dayKey)}</b>
+                      <span>
+                        {group.items.length} rencontre{group.items.length > 1 ? 's' : ''}
                       </span>
-                      <span className="matchTeams">
-                        <span>
-                          <TeamBadge team={item.home} size={34} />
-                          <b>{item.home?.name}</b>
-                          {finished && <strong>{item.home?.score}</strong>}
-                        </span>
-                        <span>
-                          <TeamBadge team={item.away} size={34} />
-                          <b>{item.away?.name}</b>
-                          {finished && <strong>{item.away?.score}</strong>}
-                        </span>
-                      </span>
-                      <span className="matchCardFoot">
-                        <span>{item.venue || 'Lieu non renseigné'}</span>
-                        <span className="openArrow">
-                          {isLastVisited ? 'CONSULTÉ · REVOIR' : 'VOIR L’ANALYSE'} <b>→</b>
-                        </span>
-                      </span>
-                    </Link>
-                  );
-                })}
+                    </header>
+                    <div className="dayGroupList">
+                      {group.items.map(item => (
+                        <div key={`${item.dayKey}-${item.id}`} id={`match-card-${item.id}`}>
+                          <MatchCard
+                            fixture={item}
+                            href={buildMatchUrl(league, item.dayKey, item.id)}
+                            onOpen={handleOpenMatch}
+                            highlighted={lastMatchId === item.id}
+                            vigilance={screenedScores[item.id]}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ))}
               </div>
             ) : (
               <div className="emptyState">

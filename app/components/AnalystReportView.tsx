@@ -462,11 +462,6 @@ export function AnalystReportView({ analyst }: { analyst: any }) {
           </div>
         </div>
       </section>
-
-      <p className="legalNote">
-        Les indicateurs de ce rapport sont des estimations statistiques issues de données publiques. Ils ne constituent ni conseil
-        de pari ni garantie de résultat.
-      </p>
     </div>
   );
 }
