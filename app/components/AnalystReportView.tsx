@@ -1,6 +1,7 @@
 'use client';
 
 import { pct } from '../lib/terrain';
+import { PronosticsPanel } from './PronosticsPanel';
 
 function fmtPct(value: any): string {
   return typeof value === 'number' ? `${Math.round(value * 100)} %` : '—';
@@ -686,6 +687,13 @@ export function AnalystReportView({ analyst }: { analyst: any }) {
           ))}
         </div>
       </section>
+
+      {/* ---------- Pronostics dérivés (lecture de la simulation) ---------- */}
+      {analyst.pronostics ? (
+        <section className="analystBlock">
+          <PronosticsPanel analyst={analyst} />
+        </section>
+      ) : null}
 
       {/* ---------- Force du calendrier ---------- */}
       <section className="analystBlock">

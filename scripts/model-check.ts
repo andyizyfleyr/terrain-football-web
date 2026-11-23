@@ -466,6 +466,196 @@ console.log('8. Garde-fous du moteur');
   check('moteur : bloc calibration présent', report.calibration.modelWeight >= 0 && report.calibration.modelWeight <= 1);
 }
 
+console.log('9. Pronostics dérivés (lecture de la simulation)');
+{
+  const emptyTable = {
+    id: 1,
+    name: 'Équipe A',
+    played: 0,
+    goalsScored: 0,
+    goalsConceded: 0,
+    xg: 0,
+    xgConceded: 0,
+  };
+  const buildInput = (shotQuality: any = null) => ({
+    matchId: 'prono-check',
+    kickoffIso: '2026-11-23T15:00:00.000Z',
+    baseLambdas: { home: 1.6, away: 1.2 },
+    covarianceSamples: [],
+    halfTimeSamples: [],
+    market: { home: 2.1, draw: 3.4, away: 3.1, format: 'decimal' as const, source: 'test' },
+    referee: null,
+    weather: null,
+    h2h: null,
+    league: { rowsAll: [emptyTable], rowsHome: [], rowsAway: [], xgRows: [], legend: [] },
+    home: {
+      teamId: 1,
+      name: 'Équipe A',
+      tableAll: emptyTable,
+      recentMatches: [],
+      stats: {},
+      squad: [],
+      absences: [],
+    },
+    away: {
+      teamId: 2,
+      name: 'Équipe B',
+      tableAll: { ...emptyTable, id: 2, name: 'Équipe B' },
+      recentMatches: [],
+      stats: {},
+      squad: [],
+      absences: [],
+    },
+    shotQuality,
+  });
+
+  const report = runQuantitativeAnalyst(buildInput() as any);
+  const p = report.pronostics;
+  const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0);
+  const sumArray = (a: number[]) => a.reduce((x, y) => x + y, 0);
+
+  check('pronostics : total impair + pair = 1', close(p.totalOdd + p.totalEven, 1, 1e-9));
+  check(
+    'pronostics : 1re mi-temps normalisée',
+    close(sum(p.halves.first), 1, 1e-9),
+    `${sum(p.halves.first).toFixed(6)}`
+  );
+  check(
+    'pronostics : 2e mi-temps normalisée',
+    close(sum(p.halves.second), 1, 1e-9),
+    `${sum(p.halves.second).toFixed(6)}`
+  );
+  check(
+    'pronostics : matrice mi-temps/fin = 1',
+    close(sum(p.halfTimeFullTime), 1, 1e-9),
+    `${sum(p.halfTimeFullTime).toFixed(6)}`
+  );
+  check(
+    'pronostics : dernier but normalisé',
+    close(p.lastGoal.home + p.lastGoal.away + p.lastGoal.none, 1, 1e-9)
+  );
+  for (const n of ['one', 'two', 'three'] as const) {
+    const bucket = p.firstTo[n];
+    check(
+      `pronostics : premier à ${n} but(s) normalisé`,
+      close(bucket.home + bucket.away + bucket.none, 1, 1e-9),
+      `${(bucket.home + bucket.away + bucket.none).toFixed(6)}`
+    );
+  }
+  check(
+    'pronostics : répartition des buts équipe 1 = 1',
+    close(sumArray(p.teamGoals.home.distribution), 1, 1e-3),
+    `${sumArray(p.teamGoals.home.distribution).toFixed(6)}`
+  );
+  check(
+    'pronostics : répartition des buts équipe 2 = 1',
+    close(sumArray(p.teamGoals.away.distribution), 1, 1e-3),
+    `${sumArray(p.teamGoals.away.distribution).toFixed(6)}`
+  );
+
+  // Cohérence interne : la clé de la matrice est « mi-temps / fin de match ».
+  // Les lignes (1er caractère) redonnent donc les issues de 1re mi-temps,
+  // les colonnes (2e caractère) redonnent le résultat final.
+  const htH = p.halfTimeFullTime['H/H'] + p.halfTimeFullTime['H/D'] + p.halfTimeFullTime['H/A'];
+  const htD = p.halfTimeFullTime['D/H'] + p.halfTimeFullTime['D/D'] + p.halfTimeFullTime['D/A'];
+  const htA = p.halfTimeFullTime['A/H'] + p.halfTimeFullTime['A/D'] + p.halfTimeFullTime['A/A'];
+  check(
+    'pronostics : lignes MT/Fin = issues de 1re mi-temps',
+    close(htH, p.halves.first.home, 1e-3) &&
+      close(htD, p.halves.first.draw, 1e-3) &&
+      close(htA, p.halves.first.away, 1e-3),
+    `${htH.toFixed(4)} / ${htD.toFixed(4)} / ${htA.toFixed(4)} vs ${p.halves.first.home.toFixed(
+      4
+    )} / ${p.halves.first.draw.toFixed(4)} / ${p.halves.first.away.toFixed(4)}`
+  );
+
+  const ftH = p.halfTimeFullTime['H/H'] + p.halfTimeFullTime['D/H'] + p.halfTimeFullTime['A/H'];
+  const ftD = p.halfTimeFullTime['H/D'] + p.halfTimeFullTime['D/D'] + p.halfTimeFullTime['A/D'];
+  const ftA = p.halfTimeFullTime['H/A'] + p.halfTimeFullTime['D/A'] + p.halfTimeFullTime['A/A'];
+  check(
+    'pronostics : colonnes MT/Fin = résultat final',
+    close(ftH, report.simulation.home, 5e-3) &&
+      close(ftD, report.simulation.draw, 5e-3) &&
+      close(ftA, report.simulation.away, 5e-3),
+    `${ftH.toFixed(4)} / ${ftD.toFixed(4)} / ${ftA.toFixed(4)} vs ${report.simulation.home.toFixed(
+      4
+    )} / ${report.simulation.draw.toFixed(4)} / ${report.simulation.away.toFixed(4)}`
+  );
+
+  // Cohérence interne : « pas de but » = 0-0 (identique pour « dernier but »
+  // et « premier à 1 but »). L'égalité avec le produit des marginales n'est
+  // qu'approximative : les buts des deux équipes sont corrélés.
+  const zeroZero = p.teamGoals.home.distribution[0] * p.teamGoals.away.distribution[0];
+  check(
+    'pronostics : « pas de but » = 0-0',
+    close(p.lastGoal.none, p.firstTo.one.none, 1e-9),
+    `${p.lastGoal.none.toFixed(4)} vs ${p.firstTo.one.none.toFixed(4)}`
+  );
+  check(
+    'pronostics : P(0-0) proche du produit des marginales',
+    Math.abs(p.lastGoal.none - zeroZero) < 0.02,
+    `${p.lastGoal.none.toFixed(4)} vs ${zeroZero.toFixed(4)}`
+  );
+  check(
+    'pronostics : clean sheet cohérent avec les buts encaissés',
+    close(p.cleanSheet.home, p.teamGoals.away.distribution[0], 2e-3) &&
+      close(p.cleanSheet.away, p.teamGoals.home.distribution[0], 2e-3)
+  );
+  check(
+    'pronostics : deux équipes ne peuvent pas être clean sheet simultanément',
+    p.cleanSheet.home + p.cleanSheet.away <= 1 + 1e-9
+  );
+
+  // But de tête : données absentes => non estimable (jamais de probabilité fabriquée).
+  check(
+    'pronostics : but de tête non estimable sans données de tir',
+    p.headerGoal.available === false && p.headerGoal.probability === null,
+    JSON.stringify(p.headerGoal)
+  );
+
+  // But de tête : données présentes => probabilité calculée à partir des buts de tête observés.
+  const shotProfile = (matches: number, headers: number, headerGoals: number) => ({
+    shots: 120,
+    goals: 12,
+    onTarget: 45,
+    bigChances: 10,
+    insideBox: 60,
+    penalties: 2,
+    setPieces: 30,
+    headers,
+    headerGoals,
+    fastBreaks: 5,
+    xg: 11,
+    xgot: 9,
+    xgPerShot: 0.09,
+    xgotPerShot: 0.075,
+    conversion: 0.1,
+    goalRate: 0.1,
+    qualityRatio: 0.82,
+    finishingRatio: 1.09,
+    matches,
+    note: 'Profil de test.',
+  });
+  const withShots = runQuantitativeAnalyst(
+    buildInput({
+      home: shotProfile(10, 24, 3),
+      away: shotProfile(10, 19, 2),
+    }) as any
+  );
+  const hg = withShots.pronostics.headerGoal;
+  check('pronostics : but de tête estimable avec des données de tir', hg.available === true);
+  check(
+    'pronostics : but de tête = 1 - exp(-λ) sur le rythme observé',
+    close(hg.probability ?? -1, 1 - Math.exp(-(5 / 10)), 1e-3),
+    `${hg.probability} vs ${(1 - Math.exp(-0.5)).toFixed(4)}`
+  );
+  check(
+    'pronostics : but de tête : volume de tentatives reported',
+    hg.attempts > 0 && hg.goals === 5 && hg.matches === 10,
+    JSON.stringify(hg)
+  );
+}
+
 console.log('');
 if (failures) {
   console.log(`✗ ${failures} contrôle(s) en échec`);

@@ -1,48 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Fixture, isFixtureFinished, longDate, pct, Team, timeOf } from '../lib/terrain';
+import { Fixture, isFixtureFinished, longDate, Team, timeOf } from '../lib/terrain';
 import { TeamBadge } from './TeamBadge';
 import { AiAnalysisLoader, MIN_ANALYSIS_MS } from './AiAnalysisLoader';
 import { AnalystReportView } from './AnalystReportView';
+import { ProbBar } from './ProbBar';
+import { pronosticsMarketCount, PronosticsPanel } from './PronosticsPanel';
 
 export { TeamBadge };
-
-function ProbBar({
-  label,
-  value,
-  color = 'var(--green)',
-  interval,
-}: {
-  label: string;
-  value: any;
-  color?: string;
-  interval?: { low: number; high: number } | null;
-}) {
-  const width = typeof value === 'number' ? Math.max(2, Math.min(100, value * 100)) : 0;
-  const hasInterval =
-    interval &&
-    typeof interval.low === 'number' &&
-    typeof interval.high === 'number' &&
-    Number.isFinite(interval.low) &&
-    Number.isFinite(interval.high);
-  return (
-    <div className="probRow">
-      <div className="probLabel">
-        <span>{label}</span>
-        <b>{pct(value)}</b>
-        {hasInterval ? (
-          <em className="probInterval">
-            {Math.round(interval.low * 100)}–{Math.round(interval.high * 100)} %
-          </em>
-        ) : null}
-      </div>
-      <div className="probTrack">
-        <i style={{ width: `${width}%`, background: color }} />
-      </div>
-    </div>
-  );
-}
 
 function FactorCard({
   number,
@@ -184,7 +150,7 @@ export function MatchAnalysisPanel({
   const [analysis, setAnalysis] = useState<any>(null);
   const [analysisLoading, setAnalysisLoading] = useState(true);
   const [analysisError, setAnalysisError] = useState('');
-  const [tab, setTab] = useState<'resume' | 'facteurs' | 'analyste' | 'vigilance'>('resume');
+  const [tab, setTab] = useState<'resume' | 'pronostics' | 'facteurs' | 'analyste' | 'vigilance'>('resume');
   const [loaderElapsed, setLoaderElapsed] = useState(0);
   const [loaderProgress, setLoaderProgress] = useState(0);
   const loaderStartRef = useRef<number>(Date.now());
@@ -324,6 +290,7 @@ export function MatchAnalysisPanel({
           <div className="analysisTabs" role="tablist" aria-label="Sections de l’analyse">
             {([
               ['resume', 'Vue d’ensemble'],
+              ['pronostics', 'Pronostics'],
               ['analyste', 'Analyste IA'],
               ['facteurs', '8 facteurs'],
               ['vigilance', 'Vigilance'],
@@ -336,6 +303,11 @@ export function MatchAnalysisPanel({
                 onClick={() => setTab(id)}
               >
                 {label}
+                {id === 'pronostics' && analyst?.pronostics ? (
+                  <small className="tabCountTag">
+                    {pronosticsMarketCount(analyst.pronostics)} marchés
+                  </small>
+                ) : null}
                 {id === 'analyste' && analyst ? <small className="tabCountTag">8 modules</small> : null}
                 {id === 'facteurs' && (homeAbsenceCount || awayAbsenceCount) ? (
                   <small className="tabCountTag">{(homeAbsenceCount || 0) + (awayAbsenceCount || 0)} abs.</small>
@@ -796,6 +768,8 @@ export function MatchAnalysisPanel({
               </div>
             </div>
           )}
+
+          {analysis && tab === 'pronostics' && <PronosticsPanel analyst={analyst} />}
 
           {analysis && tab === 'analyste' && <AnalystReportView analyst={analyst} />}
 

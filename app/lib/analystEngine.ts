@@ -543,6 +543,50 @@ export type AnalystReport = {
     topScores: { h: number; a: number; p: number }[];
     scenarios: { label: string; probability: number }[];
   };
+  /**
+   * PRONOSTICS DÉRIVÉS : marchés et questions ouvertes, tous calculés à
+   * partir de la simulation minute par minute (10 000 itérations) et,
+   * pour le but de tête, du profil de tirs des deux équipes.
+   */
+  pronostics: {
+    /** Total de buts impair / pair. */
+    totalOdd: number;
+    totalEven: number;
+    /** But de tête marqué au moins une fois (Oui/Non). */
+    headerGoal: {
+      available: boolean;
+      probability: number | null;
+      attempts: number;
+      goals: number;
+      matches: number;
+      note: string;
+    };
+    /** Nombre de buts marqués par chaque équipe (0, 1, 2, 3 ou plus). */
+    teamGoals: {
+      home: { distribution: number[]; over05: number; over15: number; mean: number };
+      away: { distribution: number[]; over05: number; over15: number; mean: number };
+    };
+    /** Issue de chaque mi-temps (équipe 1 / nul / équipe 2). */
+    halves: {
+      first: { home: number; draw: number; away: number };
+      second: { home: number; draw: number; away: number };
+    };
+    /** Qui gagne au moins une mi-temps (Oui/Non par équipe, nul inclus). */
+    atLeastOneHalf: { home: number; away: number; draw: number };
+    /** Premier à obtenir N buts (N = 1, 2, 3). */
+    firstTo: {
+      one: { home: number; away: number; none: number };
+      two: { home: number; away: number; none: number };
+      three: { home: number; away: number; none: number };
+    };
+    /** Équipe marquant le dernier but (ou aucun but). */
+    lastGoal: { home: number; away: number; none: number };
+    /** Mi-temps + fin de match (9 combinaisons). */
+    halfTimeFullTime: Record<string, number>;
+    /** Équipe qui n'encaisse pas de but. */
+    cleanSheet: { home: number; away: number };
+    note: string;
+  };
   synthesis: { headline: string; verdict: string; bullets: string[]; text: string };
   modules: AnalystModuleCard[];
 };
@@ -1354,6 +1398,29 @@ function runMonteCarlo(params: {
   let htDraw = 0;
   let winByTwo = 0;
   let goalsAfter70 = 0;
+
+  // --- Marchés dérivés (issues demandées) -----------------------------
+  let totalOdd = 0; // total de buts impair
+  const homeGoalCounts = [0, 0, 0, 0]; // 0, 1, 2, 3+
+  const awayGoalCounts = [0, 0, 0, 0];
+  const halfOutcomes = { firstHome: 0, firstDraw: 0, firstAway: 0, secondHome: 0, secondDraw: 0, secondAway: 0 };
+  let halfHomeWin = 0; // Équipe 1 gagne au moins une mi-temps
+  let halfAwayWin = 0; // Équipe 2 gagne au moins une mi-temps
+  let halfDraw = 0; // nul dans au moins une mi-temps
+  const firstTo = {
+    one: { home: 0, away: 0, none: 0 },
+    two: { home: 0, away: 0, none: 0 },
+    three: { home: 0, away: 0, none: 0 },
+  };
+  const lastGoal = { home: 0, away: 0, none: 0 };
+  const htFt: Record<string, number> = {
+    'H/H': 0, 'H/D': 0, 'H/A': 0,
+    'D/H': 0, 'D/D': 0, 'D/A': 0,
+    'A/H': 0, 'A/D': 0, 'A/A': 0,
+  };
+  let homeCleanSheet = 0; // Équipe 1 n'encaisse pas de but
+  let awayCleanSheet = 0; // Équipe 2 n'encaisse pas de but
+
   const scoreCounts = new Map<string, number>();
   const totals: number[] = [];
 
@@ -1365,6 +1432,10 @@ function runMonteCarlo(params: {
     let firstGoalMinute = -1;
     let late = 0;
     let firstHalf = 0;
+    // Minutes de chaque but : servent au « premier à N buts » et au
+    // « équipe marquant le dernier but ».
+    const homeGoalMinutes: number[] = [];
+    const awayGoalMinutes: number[] = [];
 
     for (let minute = 1; minute <= 90; minute++) {
       const curve = MINUTE_CURVE[minute - 1];
@@ -1402,12 +1473,14 @@ function runMonteCarlo(params: {
 
       if (rand() < pHome) {
         hg += 1;
+        homeGoalMinutes.push(minute);
         if (firstGoalMinute < 0) firstGoalMinute = minute;
         if (minute >= 70) late += 1;
         if (minute > 45) goalsAfter70 += 1;
       }
       if (rand() < pAway) {
         ag += 1;
+        awayGoalMinutes.push(minute);
         if (firstGoalMinute < 0) firstGoalMinute = minute;
         if (minute >= 70) late += 1;
         if (minute > 45) goalsAfter70 += 1;
@@ -1427,11 +1500,13 @@ function runMonteCarlo(params: {
       const pAway = 1 - Math.exp(-laPerMinute * 0.9);
       if (rand() < pHome) {
         hg += 1;
+        homeGoalMinutes.push(91);
         if (firstGoalMinute < 0) firstGoalMinute = 91;
         if (91 >= 70) late += 1;
       }
       if (rand() < pAway) {
         ag += 1;
+        awayGoalMinutes.push(91);
         if (firstGoalMinute < 0) firstGoalMinute = 91;
         if (91 >= 70) late += 1;
       }
@@ -1456,6 +1531,63 @@ function runMonteCarlo(params: {
     if (late > 0) lateGoal += 1;
     if (Math.abs(hg - ag) >= 2) winByTwo += 1;
     if (firstGoalMinute > 0 && firstGoalMinute <= 15) firstGoalEarly += 1;
+
+    // --- Marchés dérivés -----------------------------------------------
+    if (total % 2 === 1) totalOdd += 1;
+
+    homeGoalCounts[Math.min(3, hg)] += 1;
+    awayGoalCounts[Math.min(3, ag)] += 1;
+
+    const firstSign = Math.sign(htHome - htAway);
+    const secondHome = hg - htHome;
+    const secondAway = ag - htAway;
+    const secondSign = Math.sign(secondHome - secondAway);
+    if (firstSign > 0) halfOutcomes.firstHome += 1;
+    else if (firstSign < 0) halfOutcomes.firstAway += 1;
+    else halfOutcomes.firstDraw += 1;
+    if (secondSign > 0) halfOutcomes.secondHome += 1;
+    else if (secondSign < 0) halfOutcomes.secondAway += 1;
+    else halfOutcomes.secondDraw += 1;
+
+    if (firstSign > 0 || secondSign > 0) halfHomeWin += 1;
+    if (firstSign < 0 || secondSign < 0) halfAwayWin += 1;
+    if (firstSign === 0 || secondSign === 0) halfDraw += 1;
+
+    // Premier à obtenir N buts : on compare les minutes du N-ième but.
+    const firstToN = (
+      n: 1 | 2 | 3,
+      bucket: { home: number; away: number; none: number }
+    ) => {
+      const homeMinute = homeGoalMinutes.length >= n ? homeGoalMinutes[n - 1] : null;
+      const awayMinute = awayGoalMinutes.length >= n ? awayGoalMinutes[n - 1] : null;
+      if (homeMinute === null && awayMinute === null) bucket.none += 1;
+      else if (awayMinute === null) bucket.home += 1;
+      else if (homeMinute === null) bucket.away += 1;
+      else if (homeMinute < awayMinute) bucket.home += 1;
+      else if (awayMinute < homeMinute) bucket.away += 1;
+      else bucket.home += 1; // but simultané : avantage à l'équipe à domicile
+    };
+    firstToN(1, firstTo.one);
+    firstToN(2, firstTo.two);
+    firstToN(3, firstTo.three);
+
+    // Équipe marquant le dernier but.
+    const lastHomeMinute = homeGoalMinutes.length ? homeGoalMinutes[homeGoalMinutes.length - 1] : -1;
+    const lastAwayMinute = awayGoalMinutes.length ? awayGoalMinutes[awayGoalMinutes.length - 1] : -1;
+    if (lastHomeMinute < 0 && lastAwayMinute < 0) lastGoal.none += 1;
+    else if (lastAwayMinute < 0) lastGoal.home += 1;
+    else if (lastHomeMinute < 0) lastGoal.away += 1;
+    else if (lastHomeMinute > lastAwayMinute) lastGoal.home += 1;
+    else lastGoal.away += 1;
+
+    // Mi-temps / fin de match.
+    const htKey = firstSign > 0 ? 'H' : firstSign < 0 ? 'A' : 'D';
+    const ftKey = hg > ag ? 'H' : hg === ag ? 'D' : 'A';
+    htFt[`${htKey}/${ftKey}`] += 1;
+
+    // Clean sheets : « n'encaissera pas de but ».
+    if (ag === 0) homeCleanSheet += 1;
+    if (hg === 0) awayCleanSheet += 1;
 
     const key = `${hg}-${ag}`;
     scoreCounts.set(key, (scoreCounts.get(key) || 0) + 1);
@@ -1487,6 +1619,40 @@ function runMonteCarlo(params: {
     expectedGoals: { home: homeGoalsSum / runs, away: awayGoalsSum / runs, total: totalGoalsSum / runs },
     goalRange: { low: percentile(0.05), high: percentile(0.95), mean: totalGoalsSum / runs },
     topScores,
+    derived: {
+      totalOdd: totalOdd / runs,
+      teamGoals: {
+        home: homeGoalCounts.map(c => c / runs),
+        away: awayGoalCounts.map(c => c / runs),
+      },
+      halves: {
+        first: {
+          home: halfOutcomes.firstHome / runs,
+          draw: halfOutcomes.firstDraw / runs,
+          away: halfOutcomes.firstAway / runs,
+        },
+        second: {
+          home: halfOutcomes.secondHome / runs,
+          draw: halfOutcomes.secondDraw / runs,
+          away: halfOutcomes.secondAway / runs,
+        },
+      },
+      atLeastOneHalf: {
+        home: halfHomeWin / runs,
+        away: halfAwayWin / runs,
+        draw: halfDraw / runs,
+      },
+      firstTo: {
+        one: { home: firstTo.one.home / runs, away: firstTo.one.away / runs, none: firstTo.one.none / runs },
+        two: { home: firstTo.two.home / runs, away: firstTo.two.away / runs, none: firstTo.two.none / runs },
+        three: { home: firstTo.three.home / runs, away: firstTo.three.away / runs, none: firstTo.three.none / runs },
+      },
+      lastGoal: { home: lastGoal.home / runs, away: lastGoal.away / runs, none: lastGoal.none / runs },
+      halfTimeFullTime: Object.fromEntries(
+        Object.entries(htFt).map(([key, count]) => [key, count / runs])
+      ) as Record<string, number>,
+      cleanSheet: { home: homeCleanSheet / runs, away: awayCleanSheet / runs },
+    },
     scenarios: [
       { label: "Ouverture rapide (but ≤ 15')", probability: firstGoalEarly / runs },
       { label: 'Match nul à la pause', probability: htDraw / runs },
@@ -1998,6 +2164,104 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
     scenarios: mc.scenarios.map(s => ({ label: s.label, probability: round(s.probability, 4) })),
   };
 
+  /* --- Pronostics dérivés --------------------------------------------- */
+  // Les marchés dérivés sont lus dans la simulation minute par minute :
+  // elle seule connaît l'ordre des buts (qui marque en premier, qui
+  // marque le dernier), la répartition par période et les scores de
+  // chaque mi-temps.
+  const derived = mc.derived;
+  const teamGoalSummary = (counts: number[], mean: number) => ({
+    distribution: counts.map(c => round(c, 4)),
+    over05: round(1 - counts[0], 4),
+    over15: round(1 - counts[0] - counts[1], 4),
+    mean: round(mean, 2),
+  });
+
+  // But de tête : espérance de buts de tête = rythme de buts de tête
+  // observés chez les deux équipes (tirs de type « head » marqués),
+  // ramené au nombre de matchs couverts par le profil de tirs.
+  const headerRate = (profile: ShotQualityProfile | null): number => {
+    if (!profile || !profile.matches || profile.matches <= 0) return 0;
+    return profile.headerGoals / profile.matches;
+  };
+  const headerAttempts = (profile: ShotQualityProfile | null): number => {
+    if (!profile || !profile.matches || profile.matches <= 0) return 0;
+    return profile.headers / profile.matches;
+  };
+  const headerMatches = Math.min(shotHome?.matches || 0, shotAway?.matches || 0);
+  const headerLambda = headerRate(shotHome) + headerRate(shotAway);
+  const headerAvailable =
+    headerMatches > 0 && ((shotHome?.headers || 0) > 0 || (shotAway?.headers || 0) > 0);
+
+  const pronostics = {
+    totalOdd: round(derived.totalOdd, 4),
+    totalEven: round(1 - derived.totalOdd, 4),
+    headerGoal: {
+      available: headerAvailable,
+      probability: headerAvailable ? round(1 - Math.exp(-headerLambda), 4) : null,
+      attempts: Math.round(headerAttempts(shotHome) + headerAttempts(shotAway)),
+      goals: (shotHome?.headerGoals || 0) + (shotAway?.headerGoals || 0),
+      matches: headerMatches,
+      note: headerAvailable
+        ? `Rythme observé : ${(
+            ((shotHome?.headerGoals || 0) + (shotAway?.headerGoals || 0)) / headerMatches
+          ).toFixed(2)} but(s) de tête par match sur ${headerMatches} match(s) couvert(s) par les profils de tirs.`
+        : 'Données de tirs (type de tir) indisponibles : pronostic de but de tête non estimable.',
+    },
+    teamGoals: {
+      home: teamGoalSummary(derived.teamGoals.home, mc.expectedGoals.home),
+      away: teamGoalSummary(derived.teamGoals.away, mc.expectedGoals.away),
+    },
+    halves: {
+      first: {
+        home: round(derived.halves.first.home, 4),
+        draw: round(derived.halves.first.draw, 4),
+        away: round(derived.halves.first.away, 4),
+      },
+      second: {
+        home: round(derived.halves.second.home, 4),
+        draw: round(derived.halves.second.draw, 4),
+        away: round(derived.halves.second.away, 4),
+      },
+    },
+    atLeastOneHalf: {
+      home: round(derived.atLeastOneHalf.home, 4),
+      away: round(derived.atLeastOneHalf.away, 4),
+      draw: round(derived.atLeastOneHalf.draw, 4),
+    },
+    firstTo: {
+      one: {
+        home: round(derived.firstTo.one.home, 4),
+        away: round(derived.firstTo.one.away, 4),
+        none: round(derived.firstTo.one.none, 4),
+      },
+      two: {
+        home: round(derived.firstTo.two.home, 4),
+        away: round(derived.firstTo.two.away, 4),
+        none: round(derived.firstTo.two.none, 4),
+      },
+      three: {
+        home: round(derived.firstTo.three.home, 4),
+        away: round(derived.firstTo.three.away, 4),
+        none: round(derived.firstTo.three.none, 4),
+      },
+    },
+    lastGoal: {
+      home: round(derived.lastGoal.home, 4),
+      away: round(derived.lastGoal.away, 4),
+      none: round(derived.lastGoal.none, 4),
+    },
+    halfTimeFullTime: Object.fromEntries(
+      Object.entries(derived.halfTimeFullTime).map(([key, value]) => [key, round(value, 4)])
+    ),
+    cleanSheet: {
+      home: round(derived.cleanSheet.home, 4),
+      away: round(derived.cleanSheet.away, 4),
+    },
+    note:
+      `Tous ces pronostics sont issus de la même simulation minute par minute (${mc.runs.toLocaleString('fr-FR')} itérations) que le résultat final : ils sont cohérents entre eux et avec le score prédit.`,
+  };
+
   /* --- Confiance ------------------------------------------------------- */
   const simRanked = [
     { key: 'home', p: sim.home },
@@ -2439,6 +2703,7 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
       pitch: pitchProfile,
     },
     simulation: sim,
+    pronostics,
     synthesis,
     modules,
   };

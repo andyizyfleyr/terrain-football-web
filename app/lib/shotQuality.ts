@@ -44,6 +44,8 @@ export type ShotQualityProfile = {
   penalties: number;
   setPieces: number;
   headers: number;
+  /** Buts marqués de la tête (tirs de type « head » marqués). */
+  headerGoals: number;
   fastBreaks: number;
   xg: number;
   xgot: number;
@@ -68,6 +70,7 @@ export const EMPTY_SHOT_PROFILE: ShotQualityProfile = {
   penalties: 0,
   setPieces: 0,
   headers: 0,
+  headerGoals: 0,
   fastBreaks: 0,
   xg: 0,
   xgot: 0,
@@ -186,6 +189,7 @@ export function buildShotProfile(shots: ShotRecord[], matches: number): ShotQual
   let penalties = 0;
   let setPieces = 0;
   let headers = 0;
+  let headerGoals = 0;
   let fastBreaks = 0;
   let xg = 0;
   let xgot = 0;
@@ -197,7 +201,10 @@ export function buildShotProfile(shots: ShotRecord[], matches: number): ShotQual
     if (shot.isFromInsideBox) insideBox += 1;
     if (/penalty/i.test(shot.situation)) penalties += 1;
     else if (SET_PIECE_SITUATIONS.test(shot.situation)) setPieces += 1;
-    if (/head/i.test(shot.shotType)) headers += 1;
+    if (/head/i.test(shot.shotType)) {
+      headers += 1;
+      if (shot.isGoal) headerGoals += 1;
+    }
     if (FAST_BREAK_SITUATIONS.test(shot.situation)) fastBreaks += 1;
     xg += shot.xg;
     xgot += shot.xgot;
@@ -216,6 +223,7 @@ export function buildShotProfile(shots: ShotRecord[], matches: number): ShotQual
     penalties,
     setPieces,
     headers,
+    headerGoals,
     fastBreaks,
     xg: Number(xg.toFixed(3)),
     xgot: Number(xgot.toFixed(3)),
@@ -250,6 +258,7 @@ export function mergeShotProfiles(profiles: ShotQualityProfile[]): ShotQualityPr
       penalties: acc.penalties + p.penalties,
       setPieces: acc.setPieces + p.setPieces,
       headers: acc.headers + p.headers,
+      headerGoals: acc.headerGoals + p.headerGoals,
       fastBreaks: acc.fastBreaks + p.fastBreaks,
       xg: acc.xg + p.xg,
       xgot: acc.xgot + p.xgot,
@@ -264,6 +273,7 @@ export function mergeShotProfiles(profiles: ShotQualityProfile[]): ShotQualityPr
       penalties: 0,
       setPieces: 0,
       headers: 0,
+      headerGoals: 0,
       fastBreaks: 0,
       xg: 0,
       xgot: 0,
