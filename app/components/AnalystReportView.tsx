@@ -1,6 +1,7 @@
 'use client';
 
 import { pct } from '../lib/terrain';
+import { PronosticsPanel } from './PronosticsPanel';
 
 function fmtPct(value: any): string {
   return typeof value === 'number' ? `${Math.round(value * 100)} %` : '—';
@@ -57,6 +58,8 @@ export function AnalystReportView({ analyst }: { analyst: any }) {
   const context = analyst.context || {};
   const tactics = analyst.tactics || {};
   const schedule = analyst.scheduleStrength || {};
+  const calibration = analyst.calibration || {};
+  const uncertainty = analyst.uncertainty || {};
   const homeName = analyst.homeName || 'Dom.';
   const awayName = analyst.awayName || 'Ext.';
 
@@ -220,10 +223,193 @@ export function AnalystReportView({ analyst }: { analyst: any }) {
         ) : null}
       </section>
 
+      {/* ---------- Validation empirique & incertitude ---------- */}
+      <section className="analystBlock">
+        <div className="subsectionHeading">
+          <span className="sectionKicker">VALIDATION EMPIRIQUE · MOTEUR V3</span>
+          <h3>Calibrage hors échantillon, métriques et marges d&apos;incertitude</h3>
+          <p>
+            Les paramètres appliqués ne sont pas choisis à la main : ils sont ajustés sur un backtest walk-forward
+            (chaque rencontre rejouée avec la seule information disponible avant son coup d&apos;envoi, championnat par
+            championnat) puis versionnés. Les métriques ci-dessous sont évaluées <strong>hors échantillon</strong> :
+            les paramètres sont ajustés sur k blocs et évalués sur le bloc écarté.
+          </p>
+        </div>
+
+        <div className="calibrationGrid">
+          <div className="calibrationCard">
+            <small>Source du calibrage</small>
+            <b>{calibration.source || '—'}</b>
+            <em>{calibration.dataset || '—'}</em>
+          </div>
+          <div className="calibrationCard">
+            <small>Échantillon</small>
+            <b>{calibration.sampleSize ?? '—'} matchs</b>
+            <em>
+              {calibration.league || '—'} · {calibration.period || '—'}
+            </em>
+          </div>
+          <div className="calibrationCard">
+            <small>Poids modèle / marché</small>
+            <b>
+              {Math.round((calibration.modelWeight ?? 0) * 100)} % / {Math.round((calibration.marketWeight ?? 0) * 100)} %
+            </b>
+            <em>température {calibration.sharpness ?? '—'}</em>
+          </div>
+          <div className="calibrationCard">
+            <small>Seuil de valeur</small>
+            <b>{calibration.valueThreshold != null ? `${Math.round(calibration.valueThreshold * 100)} pts` : '—'}</b>
+            <em>concentration effective n = {calibration.effectiveSampleSize ?? '—'}</em>
+          </div>
+        </div>
+
+        <div className="analystTwoCol calibrationTwoCol">
+          <div className="analystMiniTable">
+            <div className="analystMiniHead">
+              <span>MÉTRIQUE HORS ÉCHANTILLON</span>
+              <span>VALEUR</span>
+              <span>LECTURE</span>
+            </div>
+            {[
+              [
+                'Log-loss modèle pur',
+                calibration.modelLogLoss,
+                'qualité probabiliste du modèle seul',
+              ],
+              [
+                'Log-loss calibré (hors échantillon)',
+                calibration.calibratedLogLoss,
+                `validation croisée (${calibration.crossValidationFolds ?? '—'} blocs)`,
+              ],
+              [
+                'Log-loss calibré (in-sample)',
+                calibration.calibratedLogLossInSample,
+                'optimiste : ajustement et mesure sur le même échantillon',
+              ],
+              [
+                'Log-loss marché',
+                calibration.marketLogLoss,
+                'référence bookmaker (dé-vigguée)',
+              ],
+              [
+                'Log-loss naïve',
+                calibration.naiveLogLoss,
+                'moyennes de championnat',
+              ],
+              ['Score de Brier', calibration.brier, 'erreur quadratique (3 classes)'],
+              [
+                'Précision du meilleur pari',
+                calibration.accuracy != null ? `${Math.round(calibration.accuracy * 100)} %` : null,
+                'issue retenue correcte',
+              ],
+              [
+                'ROI sur paris à « valeur »',
+                calibration.valueRoi != null ? `${Math.round(calibration.valueRoi * 100)} %` : null,
+                `${calibration.valueBets ?? 0} pari(s) au-delà du seuil`,
+              ],
+            ].map(row => (
+              <div key={String(row[0])}>
+                <span>{row[0]}</span>
+                <b>{row[1] ?? '—'}</b>
+                <em className="calibrationRead">{row[2]}</em>
+              </div>
+            ))}
+          </div>
+
+          <div className="analystMiniTable">
+            <div className="analystMiniHead">
+              <span>ISSUE</span>
+              <span>PROBABILITÉ</span>
+              <span>INTERVALLE 80 %</span>
+            </div>
+            {[
+              [`Victoire ${homeName}`, market.calibrated?.home, uncertainty.home],
+              ['Match nul', market.calibrated?.draw, uncertainty.draw],
+              [`Victoire ${awayName}`, market.calibrated?.away, uncertainty.away],
+            ].map(row => (
+              <div key={String(row[0])}>
+                <span>{row[0]}</span>
+                <b>{fmtPct(row[1])}</b>
+                <em className="calibrationRead">
+                  {row[2] && typeof row[2].low === 'number'
+                    ? `${Math.round(row[2].low * 100)} – ${Math.round(row[2].high * 100)} %`
+                    : '—'}
+                </em>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="measuredConfidence">
+          <div className="measuredConfidenceHead">
+            <span className="sectionKicker">PROBABILITÉ MESURÉE DE RÉUSSITE</span>
+            <b>
+              {typeof confidence.probability === 'number' ? `${Math.round(confidence.probability * 100)} %` : '—'}
+              {confidence.interval ? (
+                <small>
+                  {' '}
+                  [{Math.round(confidence.interval.low * 100)}–{Math.round(confidence.interval.high * 100)} %]
+                </small>
+              ) : null}
+            </b>
+          </div>
+          <p>{confidence.note}</p>
+          <div className="measuredConfidenceMeta">
+            <span>
+              Complétude des données : {Math.round((confidence.completeness ?? 0) * 100)} %
+            </span>
+            <span>
+              Séparation du modèle : {Math.round((confidence.separation ?? 0) * 100)} %
+            </span>
+            <span>
+              Accord modèle / marché : {Math.round((confidence.agreement ?? 0) * 100)} %
+            </span>
+          </div>
+          <p className="measuredConfidenceNote">
+            Ces trois mesures sont distinctes : la complétude décrit les données disponibles, la séparation décrit
+            l&apos;écart entre les deux issues les plus probables, l&apos;accord mesure la proximité du modèle et du
+            marché. Aucune de ces trois grandeurs n&apos;est une probabilité de victoire.
+          </p>
+        </div>
+
+        <div className="calibrationStructure">
+          <div className="calibrationStructureCard">
+            <small>Covariance entre les buts des deux équipes</small>
+            <b>{analyst.covariance?.value ?? '—'}</b>
+            <em>{analyst.covariance?.note}</em>
+          </div>
+          <div className="calibrationStructureCard">
+            <small>Répartition des buts par période</small>
+            <b>
+              {analyst.periodSplit?.firstHalfShare != null
+                ? `${Math.round(analyst.periodSplit.firstHalfShare * 100)} % en 1re période`
+                : '—'}
+            </b>
+            <em>{analyst.periodSplit?.note}</em>
+          </div>
+          <div className="calibrationStructureCard">
+            <small>Corrélation Dixon-Coles (ρ)</small>
+            <b>{analyst.dixonColes?.rho ?? '—'}</b>
+            <em>{analyst.dixonColes?.note}</em>
+          </div>
+        </div>
+
+        {calibration.limitations?.length ? (
+          <div className="calibrationLimits">
+            <span className="sectionKicker">LIMITES CONNUES DU CALIBRAGE</span>
+            <ul>
+              {calibration.limitations.map((item: string, i: number) => (
+                <li key={i}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </section>
+
       {/* ---------- Les 8 modules ---------- */}
       <section className="analystBlock">
         <div className="subsectionHeading">
-          <span className="sectionKicker">MOTEUR QUANTITATIF V2</span>
+          <span className="sectionKicker">MOTEUR QUANTITATIF V3</span>
           <h3>Les 8 modules d&apos;analyse</h3>
           <p>Chaque module alimente le modèle final ; les indicateurs ci-dessous sont les valeurs réellement utilisées.</p>
         </div>
@@ -501,6 +687,13 @@ export function AnalystReportView({ analyst }: { analyst: any }) {
           ))}
         </div>
       </section>
+
+      {/* ---------- Pronostics dérivés (lecture de la simulation) ---------- */}
+      {analyst.pronostics ? (
+        <section className="analystBlock">
+          <PronosticsPanel analyst={analyst} />
+        </section>
+      ) : null}
 
       {/* ---------- Force du calendrier ---------- */}
       <section className="analystBlock">

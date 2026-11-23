@@ -7,6 +7,9 @@
 // - Historique multi-saisons des confrontations directes (H2H)
 // - Météo & insights FotMob/Opta
 
+import { buildShotProfile, extractShots, mergeShotProfiles } from './shotQuality';
+import { buildPitchProfile } from './pitchProfile';
+import { readPlayerStat } from './playerImpact';
 import { runQuantitativeAnalyst } from './analystEngine';
 import type {
   AnalystInput,
@@ -568,10 +571,15 @@ export type RefereeInfo = {
   country?: string;
   matches?: number;
   yellowPerMatch?: number;
+  /** Moyenne de la league pour la même statistique (mesure du biais). */
+  yellowAverage?: number;
+  yellowAverageType?: string;
   redCardsTotal?: number;
   penaltiesTotal?: number;
   penaltiesPerMatch?: number;
   foulsPerMatch?: number;
+  foulsAverage?: number;
+  foulsAverageType?: string;
 };
 
 export type H2HItem = {
@@ -958,10 +966,18 @@ function extractReferee(infoBox: any): RefereeInfo | null {
   if (Array.isArray(ref.stats)) {
     for (const st of ref.stats) {
       if (st?.type === 'matches' && typeof st.value === 'number') info.matches = st.value;
-      else if (st?.type === 'yellowCards' && typeof st.value === 'number') info.yellowPerMatch = Number(st.value.toFixed(2));
+      else if (st?.type === 'yellowCards' && typeof st.value === 'number') {
+        info.yellowPerMatch = Number(st.value.toFixed(2));
+        if (typeof st.average === 'number') info.yellowAverage = Number(st.average.toFixed(2));
+        if (typeof st.averageType === 'string') info.yellowAverageType = st.averageType;
+      }
       else if (st?.type === 'redCards' && typeof st.value === 'number') info.redCardsTotal = st.value;
       else if (st?.type === 'penalties' && typeof st.value === 'number') info.penaltiesTotal = st.value;
-      else if (st?.type === 'fouls' && typeof st.value === 'number') info.foulsPerMatch = Number(st.value.toFixed(1));
+      else if (st?.type === 'fouls' && typeof st.value === 'number') {
+        info.foulsPerMatch = Number(st.value.toFixed(1));
+        if (typeof st.average === 'number') info.foulsAverage = Number(st.average.toFixed(2));
+        if (typeof st.averageType === 'string') info.foulsAverageType = st.averageType;
+      }
     }
     if (info.matches && info.matches > 0 && typeof info.penaltiesTotal === 'number') {
       info.penaltiesPerMatch = Number((info.penaltiesTotal / info.matches).toFixed(2));
@@ -1222,6 +1238,9 @@ function extractSquadMembers(teamPayload: any): AnalystSquadMember[] {
         excludeFromRanking: typeof m.excludeFromRanking === 'boolean' ? m.excludeFromRanking : undefined,
         injured: Boolean(m.injured),
         expectedReturn: m.injury?.expectedReturn ? String(m.injury.expectedReturn) : undefined,
+        xg: readPlayerStat(m.stats, /expected goals$|^xg$/i)?.value ?? undefined,
+        xa: readPlayerStat(m.stats, /expected assists?$/i)?.value ?? undefined,
+        minutes: readPlayerStat(m.stats, /minutes played$|total minutes$/i)?.value ?? undefined,
       });
     }
   }
@@ -1278,6 +1297,7 @@ function extractTeamFixtures(teamPayload: any): AnalystRecentMatch[] {
       homeScore,
       awayScore,
       competition: f?.tournament?.name ? String(f.tournament.name) : undefined,
+      matchId: typeof f?.id === 'number' ? f.id : undefined,
     });
   }
   return out;
@@ -1311,12 +1331,13 @@ function extractTeamFormMatches(teamPayload: any, teamId: number): AnalystRecent
   return out;
 }
 
-function extractLineupTeam(lineupTeam: any): AnalystLineup | null {
+function extractLineupTeam(lineupTeam: any, confirmed?: boolean): AnalystLineup | null {
   if (!lineupTeam) return null;
   const starters = Array.isArray(lineupTeam?.starters) ? lineupTeam.starters : [];
   if (!starters.length) return null;
   return {
     formation: lineupTeam?.formation ? String(lineupTeam.formation) : null,
+    confirmed: confirmed !== false,
     starters: starters.map((p: any) => ({
       id: Number(p?.id || 0),
       name: String(p?.name || ''),
@@ -1327,6 +1348,134 @@ function extractLineupTeam(lineupTeam: any): AnalystLineup | null {
   };
 }
 
+
+/* ------------------------------------------------------------------ */
+/* ENRICHISSEMENT « QUALITÉ DE TIR » (shotmap historique)               */
+/* ------------------------------------------------------------------ */
+/*
+ * La qualité de tir (xG par tir, xGOT par tir) n'existe que dans le
+ * shotmap, qui n'est disponible que pour les matchs DISPUTÉS. Pour estimer
+ * la qualité d'une équipe avant son match, on recharge donc ses derniers
+ * matchs terminés et on agrège leurs tirs.
+ *
+ * Le même chargement sert à trois choses :
+ *   - le profil de qualité de tir (module 03 bis),
+ *   - la répartition des buts par période (score à la mi-temps),
+ *   - la covariance entre buts des deux équipes (module 01 bis).
+ */
+
+type ShotEnrichment = {
+  shotQuality: {
+    home: ReturnType<typeof buildShotProfile> | null;
+    away: ReturnType<typeof buildShotProfile> | null;
+    league: { xgPerShot: number; xgotPerShot: number };
+  } | null;
+  halfTimeSamples: { htHome: number; htAway: number; homeGoals: number; awayGoals: number }[];
+  covarianceSamples: { homeGoals: number; awayGoals: number }[];
+};
+
+function readHalfTimeScore(details: any): { htHome: number; htAway: number } | null {
+  const halfs = details?.header?.status?.halfs;
+  if (!halfs || typeof halfs !== 'object') return null;
+  const first = halfs['1'] ?? halfs[1];
+  const second = halfs['2'] ?? halfs[2];
+  if (!first || !second) return null;
+  const htHome = Number(first.score ?? first.goals);
+  const htAway = Number(second.score ?? second.goals);
+  if (!Number.isFinite(htHome) || !Number.isFinite(htAway)) return null;
+  return { htHome, htAway };
+}
+
+function readFinalScore(details: any): { homeGoals: number; awayGoals: number } | null {
+  const teams = details?.header?.teams;
+  if (!Array.isArray(teams) || teams.length < 2) return null;
+  const homeGoals = Number(teams[0]?.score);
+  const awayGoals = Number(teams[1]?.score);
+  if (!Number.isFinite(homeGoals) || !Number.isFinite(awayGoals)) return null;
+  return { homeGoals, awayGoals };
+}
+
+async function enrichShotQuality(params: {
+  homeTeam: AnalystTeamInput;
+  awayTeam: AnalystTeamInput;
+  perTeam?: number;
+}): Promise<ShotEnrichment> {
+  const perTeam = params.perTeam ?? 3;
+  const empty: ShotEnrichment = {
+    shotQuality: null,
+    halfTimeSamples: [],
+    covarianceSamples: [],
+  };
+
+  const pickMatches = (team: AnalystTeamInput) =>
+    (team.recentMatches || [])
+      .filter(m => typeof m.matchId === 'number' && m.matchId > 0)
+      .slice(0, perTeam);
+
+  const homeMatches = pickMatches(params.homeTeam);
+  const awayMatches = pickMatches(params.awayTeam);
+  if (!homeMatches.length && !awayMatches.length) return empty;
+
+  const ids = Array.from(
+    new Set([...homeMatches, ...awayMatches].map(m => m.matchId as number))
+  ).slice(0, perTeam * 2 + 2);
+
+  const detailsList = await Promise.all(
+    ids.map(id => fetchFotmobJson<any>(`matchDetails?matchId=${id}`, 1800))
+  );
+
+  const profilesHome: ReturnType<typeof buildShotProfile>[] = [];
+  const profilesAway: ReturnType<typeof buildShotProfile>[] = [];
+  const halfTimeSamples: ShotEnrichment['halfTimeSamples'] = [];
+  const covarianceSamples: ShotEnrichment['covarianceSamples'] = [];
+  let allShots = 0;
+  let allXg = 0;
+  let allXgot = 0;
+
+  for (const details of detailsList) {
+    if (!details?.content) continue;
+    const shots = extractShots(details);
+    const homeId = Number(details?.general?.homeTeam?.id);
+    const awayId = Number(details?.general?.awayTeam?.id);
+
+    const homeShots = shots.filter(s => s.teamId !== null && s.teamId === homeId);
+    const awayShots = shots.filter(s => s.teamId !== null && s.teamId === awayId);
+    if (homeShots.length) profilesHome.push(buildShotProfile(homeShots, 1));
+    if (awayShots.length) profilesAway.push(buildShotProfile(awayShots, 1));
+
+    for (const shot of shots) {
+      allShots += 1;
+      allXg += shot.xg;
+      allXgot += shot.xgot;
+    }
+
+    const halfTime = readHalfTimeScore(details);
+    const finalScore = readFinalScore(details);
+    if (halfTime && finalScore) {
+      halfTimeSamples.push({ ...halfTime, ...finalScore });
+      covarianceSamples.push(finalScore);
+    }
+  }
+
+  if (!profilesHome.length && !profilesAway.length && !halfTimeSamples.length) return empty;
+
+  const homeProfile = profilesHome.length ? mergeShotProfiles(profilesHome) : null;
+  const awayProfile = profilesAway.length ? mergeShotProfiles(profilesAway) : null;
+
+  return {
+    shotQuality: {
+      home: homeProfile,
+      away: awayProfile,
+      league: {
+        xgPerShot: allShots ? allXg / allShots : 0,
+        xgotPerShot: allShots ? allXgot / allShots : 0,
+      },
+    },
+    halfTimeSamples,
+    covarianceSamples,
+  };
+}
+
 function buildAnalystTeamInput(params: {
   teamPayload: any;
   teamId: number;
@@ -1334,6 +1483,7 @@ function buildAnalystTeamInput(params: {
   league: LeagueContext;
   absences: UnavailablePlayerInfo[];
   lineupTeam: any;
+  lineupConfirmed?: boolean;
   formation?: string | null;
   kickoffIso: string;
 }): AnalystTeamInput {
@@ -1382,7 +1532,7 @@ function buildAnalystTeamInput(params: {
     stats,
     squad,
     absences: absencesMapped,
-    lineup: extractLineupTeam(lineupTeam),
+    lineup: extractLineupTeam(lineupTeam, params.lineupConfirmed),
     formation: formation || null,
     playerStats,
   } as AnalystTeamInput;
@@ -1408,6 +1558,11 @@ export function buildAnalystReportV2(params: {
   awayLineup: any;
   homeFormation?: string | null;
   awayFormation?: string | null;
+  lineupConfirmed?: boolean;
+  shotQuality?: ShotEnrichment['shotQuality'];
+  pitch?: ReturnType<typeof buildPitchProfile> | null;
+  halfTimeSamples?: ShotEnrichment['halfTimeSamples'];
+  covarianceSamples?: ShotEnrichment['covarianceSamples'];
 }) {
   const homeLeague = extractLeagueContext(params.homeTeamPayload, params.homeTeamId);
   const awayLeague = extractLeagueContext(params.awayTeamPayload, params.awayTeamId);
@@ -1419,6 +1574,7 @@ export function buildAnalystReportV2(params: {
     league: homeLeague,
     absences: params.homeAbsences,
     lineupTeam: params.homeLineup,
+    lineupConfirmed: params.lineupConfirmed,
     formation: params.homeFormation,
     kickoffIso: params.kickoffIso,
   });
@@ -1430,6 +1586,7 @@ export function buildAnalystReportV2(params: {
     league: awayLeague,
     absences: params.awayAbsences,
     lineupTeam: params.awayLineup,
+    lineupConfirmed: params.lineupConfirmed,
     formation: params.awayFormation,
     kickoffIso: params.kickoffIso,
   });
@@ -1451,6 +1608,10 @@ export function buildAnalystReportV2(params: {
     },
     home: homeTeam,
     away: awayTeam,
+    shotQuality: params.shotQuality || null,
+    pitch: params.pitch || null,
+    halfTimeSamples: params.halfTimeSamples || [],
+    covarianceSamples: params.covarianceSamples || [],
   };
 
   return runQuantitativeAnalyst(input);
@@ -1544,6 +1705,12 @@ export async function enrichEspnMatchWithFotmob(params: {
   const rawHomeUnav = lineup?.homeTeam?.unavailable || [];
   const rawAwayUnav = lineup?.awayTeam?.unavailable || [];
 
+  // Composition CONFIRMÉE ou seulement PRÉDITE par la source ? FotMob
+  // publie `lineupType: "predicted"` (Enetpulse) avant l'annonce officielle :
+  // traiter une composition prédite comme un onze officiel serait faux.
+  const lineupType = String(details.content?.lineup?.lineupType || '').toLowerCase();
+  const lineupConfirmed = lineupType ? lineupType !== 'predicted' : Boolean(details.general?.started || isFinished);
+
   const homeAbsences = parseUnavailableList(rawHomeUnav, homeSquad.membersById, homeSquad.totalSquadValue);
   const awayAbsences = parseUnavailableList(rawAwayUnav, awaySquad.membersById, awaySquad.totalSquadValue);
 
@@ -1604,16 +1771,61 @@ export async function enrichEspnMatchWithFotmob(params: {
     adjLambdaAway = adjLambdaAway * 0.92 + h2hEnriched.awayGoalsAvg * 0.08;
   }
 
+  // λ AVANT la pénalité d'effectif : c'est le moteur v3 qui applique
+  // l'impact des absences (une seule fois, sur contributions mesurées).
+  // On conserve ici la version pénalisée pour le chemin « vue journée ».
+  const lambdaHomeNoAbsence = adjLambdaHome;
+  const lambdaAwayNoAbsence = adjLambdaAway;
+
   // Pondération des blessés & suspendus (baisse de l'attaque propre + hausse des buts concédés si défense décimée)
   adjLambdaHome = adjLambdaHome * homePenalty.attackMultiplier * awayPenalty.defenseConcedeMultiplier;
   adjLambdaAway = adjLambdaAway * awayPenalty.attackMultiplier * homePenalty.defenseConcedeMultiplier;
 
   const recomputed = computeProbabilitiesFromLambdas(adjLambdaHome, adjLambdaAway);
 
-  // 6bis. MOTEUR D'ANALYSE QUANTITATIVE v2 — 8 modules (Dixon-Coles, calendrier,
-  // npxG & coups de pied arrêtés, absences intelligentes, tactique, calibration
-  // marché, congestion 14 jours, Monte-Carlo 10 000 itérations).
+  // 6bis. MOTEUR D'ANALYSE QUANTITATIVE v3 — 8 modules (score bivarié,
+  // calendrier, qualité de tir, absences mesurées, tactique, calibration
+  // marché calibrée, contexte, Monte-Carlo 10 000 itérations).
   let analystReport: any = null;
+
+  // Enrichissement « qualité de tir » : on recharge les derniers matchs
+  // terminés des deux équipes pour obtenir le shotmap (xG/xGOT par tir), le
+  // score à la mi-temps et la covariance. Budget volontairement borné.
+  let shotEnrichment: ShotEnrichment = {
+    shotQuality: null,
+    halfTimeSamples: [],
+    covarianceSamples: [],
+  };
+  if (deepTeamFetch && homeTeamPayload && awayTeamPayload) {
+    const homeInput = buildAnalystTeamInput({
+      teamPayload: homeTeamPayload,
+      teamId: homeTeamId,
+      teamName: espnMatch.home.name,
+      league: extractLeagueContext(homeTeamPayload, homeTeamId),
+      absences: homeAbsences,
+      lineupTeam: lineup?.homeTeam,
+      lineupConfirmed,
+      formation: homeFormation,
+      kickoffIso: espnMatch.date || new Date().toISOString(),
+    });
+    const awayInput = buildAnalystTeamInput({
+      teamPayload: awayTeamPayload,
+      teamId: awayTeamId,
+      teamName: espnMatch.away.name,
+      league: extractLeagueContext(awayTeamPayload, awayTeamId),
+      absences: awayAbsences,
+      lineupTeam: lineup?.awayTeam,
+      lineupConfirmed,
+      formation: awayFormation,
+      kickoffIso: espnMatch.date || new Date().toISOString(),
+    });
+    try {
+      shotEnrichment = await enrichShotQuality({ homeTeam: homeInput, awayTeam: awayInput, perTeam: 3 });
+    } catch {
+      shotEnrichment = { shotQuality: null, halfTimeSamples: [], covarianceSamples: [] };
+    }
+  }
+
   if (deepTeamFetch && homeTeamPayload && awayTeamPayload) {
     try {
       analystReport = buildAnalystReportV2({
@@ -1625,7 +1837,7 @@ export async function enrichEspnMatchWithFotmob(params: {
         awayName: espnMatch.away.name,
         kickoffIso: espnMatch.date || new Date().toISOString(),
         matchId: String(matchedDayItem.id),
-        baseLambdas: { home: adjLambdaHome, away: adjLambdaAway },
+        baseLambdas: { home: lambdaHomeNoAbsence, away: lambdaAwayNoAbsence },
         market: marketPayload,
         referee,
         weather: fotmobWeather,
@@ -1642,6 +1854,11 @@ export async function enrichEspnMatchWithFotmob(params: {
         awayLineup: lineup?.awayTeam,
         homeFormation,
         awayFormation,
+        lineupConfirmed,
+        shotQuality: shotEnrichment.shotQuality,
+        pitch: buildPitchProfile(infoBox?.Stadium),
+        halfTimeSamples: shotEnrichment.halfTimeSamples,
+        covarianceSamples: shotEnrichment.covarianceSamples,
       });
     } catch {
       analystReport = null;

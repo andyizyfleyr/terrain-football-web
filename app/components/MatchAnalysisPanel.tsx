@@ -1,27 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Fixture, isFixtureFinished, longDate, pct, Team, timeOf } from '../lib/terrain';
+import { Fixture, isFixtureFinished, longDate, Team, timeOf } from '../lib/terrain';
 import { TeamBadge } from './TeamBadge';
 import { AiAnalysisLoader, MIN_ANALYSIS_MS } from './AiAnalysisLoader';
 import { AnalystReportView } from './AnalystReportView';
+import { ProbBar } from './ProbBar';
+import { pronosticsMarketCount, PronosticsPanel } from './PronosticsPanel';
 
 export { TeamBadge };
-
-function ProbBar({ label, value, color = 'var(--green)' }: { label: string; value: any; color?: string }) {
-  const width = typeof value === 'number' ? Math.max(2, Math.min(100, value * 100)) : 0;
-  return (
-    <div className="probRow">
-      <div className="probLabel">
-        <span>{label}</span>
-        <b>{pct(value)}</b>
-      </div>
-      <div className="probTrack">
-        <i style={{ width: `${width}%`, background: color }} />
-      </div>
-    </div>
-  );
-}
 
 function FactorCard({
   number,
@@ -163,7 +150,7 @@ export function MatchAnalysisPanel({
   const [analysis, setAnalysis] = useState<any>(null);
   const [analysisLoading, setAnalysisLoading] = useState(true);
   const [analysisError, setAnalysisError] = useState('');
-  const [tab, setTab] = useState<'resume' | 'facteurs' | 'analyste' | 'vigilance'>('resume');
+  const [tab, setTab] = useState<'resume' | 'pronostics' | 'facteurs' | 'analyste' | 'vigilance'>('resume');
   const [loaderElapsed, setLoaderElapsed] = useState(0);
   const [loaderProgress, setLoaderProgress] = useState(0);
   const loaderStartRef = useRef<number>(Date.now());
@@ -303,6 +290,7 @@ export function MatchAnalysisPanel({
           <div className="analysisTabs" role="tablist" aria-label="Sections de l’analyse">
             {([
               ['resume', 'Vue d’ensemble'],
+              ['pronostics', 'Pronostics'],
               ['analyste', 'Analyste IA'],
               ['facteurs', '8 facteurs'],
               ['vigilance', 'Vigilance'],
@@ -315,6 +303,11 @@ export function MatchAnalysisPanel({
                 onClick={() => setTab(id)}
               >
                 {label}
+                {id === 'pronostics' && analyst?.pronostics ? (
+                  <small className="tabCountTag">
+                    {pronosticsMarketCount(analyst.pronostics)} marchés
+                  </small>
+                ) : null}
                 {id === 'analyste' && analyst ? <small className="tabCountTag">8 modules</small> : null}
                 {id === 'facteurs' && (homeAbsenceCount || awayAbsenceCount) ? (
                   <small className="tabCountTag">{(homeAbsenceCount || 0) + (awayAbsenceCount || 0)} abs.</small>
@@ -427,29 +420,40 @@ export function MatchAnalysisPanel({
               <div className="predictionIntro">
                 <div>
                   <span className="sectionKicker">
-                    {analyst ? 'MOTEUR QUANTITATIF V2 · 8 MODULES' : 'MODÈLE STATISTIQUE ENRICHI'}
+                    {analyst ? 'MOTEUR QUANTITATIF V3 · VALIDATION EMPIRIQUE' : 'MODÈLE STATISTIQUE ENRICHI'}
                   </span>
                   <h3>Estimations du match</h3>
                   <small>
                     Forme récente ({freshHome}/5 & {freshAway}/5 matchs)
                     {analyst
-                      ? ' · Dixon-Coles, calendrier ajusté, Monte-Carlo 10 000'
+                      ? ' · score bivarié, covariance, répartition des périodes, Monte-Carlo 10 000'
                       : fotmob
                       ? ' · xG, effectifs & confrontations intégrés'
                       : ' · sur 60 jours max'}
                   </small>
                 </div>
-                <span className="modelMark">{analyst ? 'Dixon-Coles + xG' : fotmob ? 'Poisson + xG' : 'Poisson'}</span>
+                <span className="modelMark">{analyst ? 'Bivarié + xG · V3' : fotmob ? 'Poisson + xG' : 'Poisson'}</span>
               </div>
               {analyst && (
                 <div className="analystStrip">
                   <div className="analystStripScore">
-                    <span>CONFIANCE ANALYSTE</span>
+                    <span>SCORE ANALYSTE</span>
                     <b>
                       {analyst.confidence?.score ?? '—'}
                       <small>/100</small>
                     </b>
                     <em>{analyst.confidence?.label || '—'}</em>
+                    <small className="analystStripBasis">complétude · séparation · accord</small>
+                    {typeof analyst.confidence?.probability === 'number' ? (
+                      <small className="analystStripMeasured">
+                        probabilité mesurée {Math.round(analyst.confidence.probability * 100)} %
+                        {analyst.confidence?.interval
+                          ? ` [${Math.round(analyst.confidence.interval.low * 100)}–${Math.round(
+                              analyst.confidence.interval.high * 100
+                            )} %]`
+                          : ''}
+                      </small>
+                    ) : null}
                   </div>
                   <div className="analystStripBody">
                     <span className="sectionKicker">SYNTHÈSE DE L’ANALYSTE IA</span>
@@ -458,6 +462,12 @@ export function MatchAnalysisPanel({
                     <div className="analystStripMeta">
                       <span>λ {analyst.lambdas?.home} – {analyst.lambdas?.away}</span>
                       <span>ρ {analyst.dixonColes?.rho}</span>
+                      {typeof analyst.covariance?.value === 'number' ? (
+                        <span>cov {analyst.covariance.value}</span>
+                      ) : null}
+                      {typeof analyst.periodSplit?.firstHalfShare === 'number' ? (
+                        <span>1re période {Math.round(analyst.periodSplit.firstHalfShare * 100)} %</span>
+                      ) : null}
                       <span>MC 10 000</span>
                       <span>temps pondéré e^(−ξΔt)</span>
                     </div>
@@ -506,9 +516,23 @@ export function MatchAnalysisPanel({
                       <small>Temps réglementaire</small>
                     </div>
                   </div>
-                  <ProbBar label={`Victoire · ${fixture.home?.short || 'domicile'}`} value={probabilities.home} />
-                  <ProbBar label="Match nul" value={probabilities.draw} color="var(--gold)" />
-                  <ProbBar label={`Victoire · ${fixture.away?.short || 'extérieur'}`} value={probabilities.away} color="var(--blue)" />
+                  <ProbBar
+                    label={`Victoire · ${fixture.home?.short || 'domicile'}`}
+                    value={probabilities.home}
+                    interval={analyst?.uncertainty?.home}
+                  />
+                  <ProbBar
+                    label="Match nul"
+                    value={probabilities.draw}
+                    color="var(--gold)"
+                    interval={analyst?.uncertainty?.draw}
+                  />
+                  <ProbBar
+                    label={`Victoire · ${fixture.away?.short || 'extérieur'}`}
+                    value={probabilities.away}
+                    color="var(--blue)"
+                    interval={analyst?.uncertainty?.away}
+                  />
                 </article>
 
                 <article className="predictionCard">
@@ -744,6 +768,8 @@ export function MatchAnalysisPanel({
               </div>
             </div>
           )}
+
+          {analysis && tab === 'pronostics' && <PronosticsPanel analyst={analyst} />}
 
           {analysis && tab === 'analyste' && <AnalystReportView analyst={analyst} />}
 
