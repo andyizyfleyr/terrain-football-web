@@ -1,7 +1,7 @@
 'use client';
 
 import { pct } from '../lib/terrain';
-import { PronosticsPanel } from './PronosticsPanel';
+import { pronosticsMarketCount, PronosticsPanel } from './PronosticsPanel';
 
 function fmtPct(value: any): string {
   return typeof value === 'number' ? `${Math.round(value * 100)} %` : '—';
@@ -34,7 +34,14 @@ function statusLabel(status: string): string {
   return 'Données absentes';
 }
 
-export function AnalystReportView({ analyst }: { analyst: any }) {
+export function AnalystReportView({
+  analyst,
+  meta,
+}: {
+  analyst: any;
+  /** Contexte d'impression : championnat, date et identifiant du match. */
+  meta?: { leagueName?: string; leagueSlug?: string; dateLabel?: string; matchId?: string | number };
+}) {
   if (!analyst) {
     return (
       <div className="analystEmpty">
@@ -62,6 +69,25 @@ export function AnalystReportView({ analyst }: { analyst: any }) {
   const uncertainty = analyst.uncertainty || {};
   const homeName = analyst.homeName || 'Dom.';
   const awayName = analyst.awayName || 'Ext.';
+
+  /* --- En-tête du document imprimable ------------------------------- */
+  const kickoff = analyst.kickoffIso ? new Date(analyst.kickoffIso) : null;
+  const kickoffLabel =
+    kickoff && !Number.isNaN(kickoff.getTime())
+      ? kickoff.toLocaleDateString('fr-FR', {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        })
+      : '';
+  const leagueLabel = meta?.leagueName || meta?.leagueSlug || '';
+  const generated = analyst.generatedAt ? new Date(analyst.generatedAt) : null;
+  const generatedLabel =
+    generated && !Number.isNaN(generated.getTime())
+      ? generated.toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' })
+      : '';
+  const marketCount = pronosticsMarketCount(analyst.pronostics);
 
   const outcomeRows = [
     { label: `Victoire ${homeName}`, model: market.pureModel?.home, calibrated: market.calibrated?.home, market: market.devigged?.home, edge: market.edges?.home },
@@ -101,6 +127,37 @@ export function AnalystReportView({ analyst }: { analyst: any }) {
 
   return (
     <div className="analystArea">
+      {/* ---------- Barre d'impression (écran uniquement) ---------- */}
+      <div className="printToolbar">
+        <span className="printToolbarHint">
+          Rapport imprimable · les pronostics dérivés figurent au même titre que le reste de l&apos;analyse
+        </span>
+        <button type="button" className="printButton" onClick={() => window.print()}>
+          Imprimer / PDF
+        </button>
+      </div>
+
+      {/* ---------- En-tête du document (impression uniquement) ---------- */}
+      <header className="printHeader">
+        <span className="sectionKicker">TERRAIN · RAPPORT DE L&apos;ANALYSTE IA</span>
+        <h2>
+          {homeName} — {awayName}
+        </h2>
+        <p>
+          {[leagueLabel, kickoffLabel].filter(Boolean).join(' · ')}
+          {synthesis.verdict ? ` · ${synthesis.verdict}` : ''}
+        </p>
+        <small>
+          {[
+            generatedLabel ? `Document généré le ${generatedLabel}` : '',
+            'Moteur quantitatif v3 · 10 000 simulations minute par minute',
+            'Estimations statistiques, jamais des certitudes',
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </small>
+      </header>
+
       {/* ---------- Verdict & confiance ---------- */}
       <section className="analystVerdict">
         <div className="analystConfidence">
@@ -690,8 +747,18 @@ export function AnalystReportView({ analyst }: { analyst: any }) {
 
       {/* ---------- Pronostics dérivés (lecture de la simulation) ---------- */}
       {analyst.pronostics ? (
-        <section className="analystBlock">
-          <PronosticsPanel analyst={analyst} />
+        <section className="analystBlock analystPronosticsBlock">
+          <div className="subsectionHeading">
+            <span className="sectionKicker">MARCHÉS DÉRIVÉS · LECTURE DE LA SIMULATION</span>
+            <h3>{marketCount} pronostics dérivés du même Monte-Carlo que le score final</h3>
+            <p>
+              Chaque pourcentage ci-dessous est lu dans la simulation minute par minute (10 000
+              itérations) qui produit le score prédit : un but compté « premier » est le même but que
+              celui compté « dernier » ou celui du score à la mi-temps. Aucun marché n&apos;est estimé
+              séparément.
+            </p>
+          </div>
+          <PronosticsPanel analyst={analyst} hideHeading />
         </section>
       ) : null}
 

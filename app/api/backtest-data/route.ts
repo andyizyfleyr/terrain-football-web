@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { parseMarketOdds } from '../../lib/marketOdds';
 import { extractShots } from '../../lib/shotQuality';
 import { readPlayerStat } from '../../lib/playerImpact';
+import { readLeagueIdentity, readMatchLeagueSlug } from '../../lib/leagueIdentity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -267,6 +268,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Payload de ligue indisponible.' }, { status: 502 });
     }
 
+    // Identité RÉELLE de la ligue servie par la source. Elle peut différer
+    // de l'id demandé : on ne fige plus le libellé, on le déduit.
+    const leagueIdentity = readLeagueIdentity(leaguePayload);
+    const requestedLeagueSlug = readLeagueIdentity({
+      fotmobId: leagueId,
+      name: null,
+      country: null,
+    }).slug;
+
     const rawMatches = collectMatches(leaguePayload)
       .map(m => ({
         id: Number(m.id),
@@ -279,6 +289,10 @@ export async function GET(request: NextRequest) {
         utcTime: String(m.status?.utcTime || ''),
         finished: Boolean(m.status?.finished ?? m.status?.id === 6),
         leagueId: Number(m.leagueId ?? m.primaryLeagueId ?? 0),
+        league: readMatchLeagueSlug(
+          { leagueId: Number(m.leagueId ?? m.primaryLeagueId ?? 0) },
+          leagueIdentity
+        ),
       }))
       .filter(m => m.id && m.homeId && m.awayId && m.finished && Number.isFinite(m.homeScore))
       .sort((a, b) => a.utcTime.localeCompare(b.utcTime));
@@ -344,7 +358,7 @@ export async function GET(request: NextRequest) {
       return {
         id: String(match.id),
         date: match.utcTime.slice(0, 10),
-        league: 'eng.1',
+        league: match.league,
         homeId: match.homeId,
         homeName: match.homeName,
         awayId: match.awayId,
@@ -419,8 +433,11 @@ export async function GET(request: NextRequest) {
     if (format === 'summary') {
       const datesAll = rawMatches.map(m => m.utcTime.slice(0, 10)).sort();
       return NextResponse.json({
-        league: 'eng.1',
+        league: leagueIdentity.slug,
         leagueId,
+        leagueName: leagueIdentity.name,
+        requestedLeague: requestedLeagueSlug,
+        leagues: Array.from(new Set(matches.map(m => m.league))),
         season,
         totalFinished: rawMatches.length,
         firstDate: datesAll[0] ?? null,
@@ -481,8 +498,11 @@ export async function GET(request: NextRequest) {
       });
       return NextResponse.json({
         format: 'lean-v1',
-        league: 'eng.1',
+        league: leagueIdentity.slug,
         leagueId,
+        leagueName: leagueIdentity.name,
+        requestedLeague: requestedLeagueSlug,
+        leagues: Array.from(new Set(matches.map(m => m.league))),
         season,
         period: dates.length ? `${dates[0]} → ${dates[dates.length - 1]}` : '',
         counts: {
@@ -512,8 +532,11 @@ export async function GET(request: NextRequest) {
     if (format === 'packed') {
       return NextResponse.json({
         format: 'packed-v1',
-        league: 'eng.1',
+        league: leagueIdentity.slug,
         leagueId,
+        leagueName: leagueIdentity.name,
+        requestedLeague: requestedLeagueSlug,
+        leagues: Array.from(new Set(matches.map(m => m.league))),
         season,
         period: dates.length ? `${dates[0]} → ${dates[dates.length - 1]}` : '',
         counts: {
@@ -552,8 +575,11 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
-      league: 'eng.1',
+      league: leagueIdentity.slug,
       leagueId,
+      leagueName: leagueIdentity.name,
+      requestedLeague: requestedLeagueSlug,
+      leagues: Array.from(new Set(matches.map(m => m.league))),
       season,
       period: dates.length ? `${dates[0]} → ${dates[dates.length - 1]}` : '',
       generatedAt: new Date().toISOString(),

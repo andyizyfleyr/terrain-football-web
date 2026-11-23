@@ -38,6 +38,11 @@ import { analyseSequences, extractPollFacts, sequenceAttackAdjustment } from '..
 import { buildRefereeProfile } from '../app/lib/refereeProfile.ts';
 import { buildPitchProfile } from '../app/lib/pitchProfile.ts';
 import {
+  readLeagueIdentity,
+  readMatchLeagueSlug,
+  resolveLeagueSlug,
+} from '../app/lib/leagueIdentity.ts';
+import {
   applyCalibration,
   blendProbabilities,
   calibratedConfidence,
@@ -653,6 +658,52 @@ console.log('9. Pronostics dérivés (lecture de la simulation)');
     'pronostics : but de tête : volume de tentatives reported',
     hg.attempts > 0 && hg.goals === 5 && hg.matches === 10,
     JSON.stringify(hg)
+  );
+}
+
+console.log('10. Identité de championnat (collecte)');
+{
+  // Payload `leagues?id=87` (LaLiga) : identité déduite, jamais codée en dur.
+  const laLigaPayload = {
+    details: { id: 87, name: 'LaLiga', country: 'ESP', type: 'league' },
+    table: [{ data: { leagueId: 87, leagueName: 'LaLiga' } }],
+  };
+  const laLiga = readLeagueIdentity(laLigaPayload);
+  check('ligue : LaLiga (id 87) → esp.1', laLiga.slug === 'esp.1', laLiga.slug);
+  check('ligue : nom de ligue conservé', laLiga.name === 'LaLiga', String(laLiga.name));
+
+  const premierLeague = readLeagueIdentity({
+    details: { id: 47, name: 'Premier League', country: 'ENG' },
+  });
+  check('ligue : Premier League (id 47) → eng.1', premierLeague.slug === 'eng.1', premierLeague.slug);
+
+  // Cas du bug : la source renvoie l'esp.1 alors que l'eng.1 était demandé.
+  const match = readMatchLeagueSlug({ primaryLeagueId: 87 }, premierLeague);
+  check(
+    'ligue : le match prime sur la ligue demandée (La Liga dans un flux PL)',
+    match === 'esp.1',
+    match
+  );
+  const sameLeague = readMatchLeagueSlug({ leagueId: 47 }, premierLeague);
+  check('ligue : match de la ligue demandée conservé', sameLeague === 'eng.1', sameLeague);
+  const unknownLeague = readMatchLeagueSlug({}, premierLeague);
+  check('ligue : repli sur la ligue de la source', unknownLeague === 'eng.1', unknownLeague);
+
+  // Replis : nom seul, puis pays seul, puis identifiant inconnu.
+  check(
+    'ligue : repli par nom',
+    resolveLeagueSlug({ name: 'LaLiga' }) === 'esp.1',
+    resolveLeagueSlug({ name: 'LaLiga' })
+  );
+  check(
+    'ligue : repli par pays',
+    resolveLeagueSlug({ fotmobId: 999, name: 'Liga Mystery', country: 'ESP' }) === 'esp.1',
+    resolveLeagueSlug({ fotmobId: 999, name: 'Liga Mystery', country: 'ESP' })
+  );
+  check(
+    'ligue : identifiant inconnu conservé de façon lisible',
+    resolveLeagueSlug({ fotmobId: 999 }) === 'league-999',
+    resolveLeagueSlug({ fotmobId: 999 })
   );
 }
 
