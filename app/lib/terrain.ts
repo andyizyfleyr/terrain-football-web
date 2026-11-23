@@ -3,7 +3,7 @@ export type Team = { id: string; name: string; short: string; logo?: string; sco
 export type Fixture = { id: string; date: string; name: string; home: Team; away: Team; venue?: string; city?: string; odds?: any };
 export type MonthFixture = Fixture & { dayKey: string };
 export type DayEvents = Record<string, Fixture[]>;
-export type StatusTab = 'all' | 'upcoming' | 'finished';
+export type StatusTab = 'upcoming' | 'finished';
 
 export const pad = (n: number) => String(n).padStart(2, '0');
 export const todayKey = () => {
