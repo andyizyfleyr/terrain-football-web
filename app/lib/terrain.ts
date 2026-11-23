@@ -21,11 +21,27 @@ export const longDate = (value: string) =>
     : '';
 export const shortDate = (value: string) =>
   value ? new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${value}T12:00:00`)) : '';
+export const dayHeading = (value: string) =>
+  value ? new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(`${value}T12:00:00`)) : '';
+export const dayHeadingShort = (value: string) =>
+  value ? new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${value}T12:00:00`)) : '';
 export const timeOf = (value: string) =>
   value
     ? new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Porto-Novo' }).format(new Date(value))
     : 'Heure à confirmer';
 export const pct = (value: any) => (typeof value === 'number' ? `${Math.round(value * 100)}%` : '—');
+
+/** Distance en jours avant le coup d'envoi, pour un libellé compact sur les cartes. */
+export function countdownLabel(date: string): string {
+  const kick = Date.parse(date);
+  if (!Number.isFinite(kick)) return '';
+  const diff = kick - Date.now();
+  if (diff <= 0) return 'EN COURS';
+  const days = Math.floor(diff / 86400000);
+  if (days <= 0) return "AUJOURD'HUI";
+  if (days === 1) return 'DEMAIN';
+  return `J-${days}`;
+}
 
 export function isFixtureFinished(item: Fixture): boolean {
   const kickOff = Date.parse(item.date);

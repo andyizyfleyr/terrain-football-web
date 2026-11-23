@@ -276,6 +276,56 @@ export function MatchAnalysisPanel({
 
   return (
     <section className="analysisPanel" id="analyse">
+      {/* En-tête collant : score rapide + onglets, toujours visibles sur mobile */}
+      <div className="analysisSticky">
+        {fixture && (
+          <div className="matchQuickBar">
+            {onClose && (
+              <button type="button" className="matchQuickBack" onClick={onClose} aria-label={closeLabel}>
+                ←
+              </button>
+            )}
+            <div className="matchQuickTeams">
+              <span className="matchQuickSide">
+                <TeamBadge team={fixture.home} size={22} />
+                <b>{fixture.home?.short || fixture.home?.name || 'Dom.'}</b>
+              </span>
+              <strong>{finished ? `${fixture.home?.score}–${fixture.away?.score}` : timeOf(fixture.date)}</strong>
+              <span className="matchQuickSide matchQuickSideAway">
+                <b>{fixture.away?.short || fixture.away?.name || 'Ext.'}</b>
+                <TeamBadge team={fixture.away} size={22} />
+              </span>
+            </div>
+          </div>
+        )}
+
+        {!showLoader && (
+          <div className="analysisTabs" role="tablist" aria-label="Sections de l’analyse">
+            {([
+              ['resume', 'Vue d’ensemble'],
+              ['analyste', 'Analyste IA'],
+              ['facteurs', '8 facteurs'],
+              ['vigilance', 'Vigilance'],
+            ] as const).map(([id, label]) => (
+              <button
+                key={id}
+                role="tab"
+                aria-selected={tab === id}
+                className={tab === id ? 'tabActive' : ''}
+                onClick={() => setTab(id)}
+              >
+                {label}
+                {id === 'analyste' && analyst ? <small className="tabCountTag">8 modules</small> : null}
+                {id === 'facteurs' && (homeAbsenceCount || awayAbsenceCount) ? (
+                  <small className="tabCountTag">{(homeAbsenceCount || 0) + (awayAbsenceCount || 0)} abs.</small>
+                ) : null}
+                {id === 'vigilance' && <i />}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="analysisTopline">
         <div className="analysisToplineLeft">
           {onClose && (
@@ -288,9 +338,6 @@ export function MatchAnalysisPanel({
             <h2>Analyse de la rencontre</h2>
           </div>
         </div>
-        <div className="analysisTopBadges">
-          <span className="estimatePill">ESTIMATION · NON GARANTIE</span>
-        </div>
       </div>
 
       {fixture ? (
@@ -298,8 +345,6 @@ export function MatchAnalysisPanel({
           <div className="matchHero">
             <div className="analysisMatchMeta">
               <span>{longDate(dayKey)}</span>
-              <span>·</span>
-              <span>{timeOf(fixture.date)} COT</span>
               {fixture.venue && (
                 <>
                   <span>·</span>
@@ -317,25 +362,28 @@ export function MatchAnalysisPanel({
               </span>
             </div>
             <div className="scoreboard">
-              <div>
-                <TeamBadge team={fixture.home} size={56} />
+              <div className="scoreTeam">
+                <TeamBadge team={fixture.home} size={64} />
                 <b>{fixture.home?.name}</b>
                 <small>
                   DOMICILE{coaches?.home ? ` · ${coaches.home}` : ''}
                 </small>
               </div>
-              {finished ? (
-                <div className="finalScoreBox">
-                  <strong>
-                    {fixture.home?.score} <i>–</i> {fixture.away?.score}
-                  </strong>
-                  <small>SCORE FINAL</small>
-                </div>
-              ) : (
-                <span className="vsToken">VS</span>
-              )}
-              <div>
-                <TeamBadge team={fixture.away} size={56} />
+              <div className="scoreMiddle">
+                {finished ? (
+                  <div className="finalScoreBox">
+                    <strong>
+                      {fixture.home?.score} <i>–</i> {fixture.away?.score}
+                    </strong>
+                    <small>SCORE FINAL</small>
+                  </div>
+                ) : (
+                  <span className="vsToken">VS</span>
+                )}
+                <small className="scoreKick">{timeOf(fixture.date)} COT</small>
+              </div>
+              <div className="scoreTeam">
+                <TeamBadge team={fixture.away} size={64} />
                 <b>{fixture.away?.name}</b>
                 <small>
                   EXTÉRIEUR{coaches?.away ? ` · ${coaches.away}` : ''}
@@ -372,24 +420,6 @@ export function MatchAnalysisPanel({
             />
           ) : (
             <>
-          <div className="analysisTabs">
-            {([
-              ['resume', 'Vue d’ensemble'],
-              ['analyste', 'Analyste IA'],
-              ['facteurs', '8 facteurs'],
-              ['vigilance', 'Vigilance'],
-            ] as const).map(([id, label]) => (
-              <button key={id} className={tab === id ? 'tabActive' : ''} onClick={() => setTab(id)}>
-                {label}
-                {id === 'analyste' && analyst ? <small className="tabCountTag">8 modules</small> : null}
-                {id === 'facteurs' && (homeAbsenceCount || awayAbsenceCount) ? (
-                  <small className="tabCountTag">{(homeAbsenceCount || 0) + (awayAbsenceCount || 0)} abs.</small>
-                ) : null}
-                {id === 'vigilance' && <i />}
-              </button>
-            ))}
-          </div>
-
           {analysisError && <div className="analysisError">{analysisError}</div>}
 
           {analysis && tab === 'resume' && (
@@ -736,8 +766,8 @@ export function MatchAnalysisPanel({
               <div className="fiveMinuteNote">
                 <b>Lecture rapide</b>
                 <span>
-                  Les absences (blessés/suspendus) et les xG/xGA de la saison ajustent directement les buts attendus (λ) du modèle de
-                  Poisson. Vérifiez toujours le onze officiel publié 1h avant le coup d’envoi.
+                  Les absences (blessés/suspendus) et les xG/xGA de la saison ajustent directement les buts attendus (λ) du modèle
+                  Dixon-Coles. Vérifiez toujours le onze officiel publié 1h avant le coup d’envoi.
                 </span>
               </div>
             </div>

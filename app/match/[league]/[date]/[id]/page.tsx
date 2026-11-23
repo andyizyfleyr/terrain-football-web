@@ -60,9 +60,6 @@ export default function MatchAnalysisPage() {
           </button>
           <span className="navCurrent">Analyse</span>
         </nav>
-        <div className="dataStatus">
-          <span className="statusPulse" /> Flux en direct
-        </div>
       </header>
 
       <div className="matchPageBody">
