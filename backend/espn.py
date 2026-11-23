@@ -95,6 +95,22 @@ def _competitors(competition: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+def _score_value(competitor: Dict[str, Any]) -> int:
+    """Score d'un concurrent ESPN.
+
+    L'API renvoie un scalaire dans le scoreboard (`"score": "2"`) mais un
+    objet dans le calendrier d'équipe (`"score": {"value": 2.0,
+    "displayValue": "2"}`) : les deux formes sont gérées.
+    """
+    score = competitor.get("score")
+    if isinstance(score, dict):
+        for key in ("value", "displayValue"):
+            if score.get(key) is not None:
+                return _int(score.get(key))
+        return 0
+    return _int(score)
+
+
 def _team_side(competitor: Dict[str, Any]) -> Dict[str, Any]:
     team = competitor.get("team") or {}
     return {
@@ -102,7 +118,7 @@ def _team_side(competitor: Dict[str, Any]) -> Dict[str, Any]:
         "name": team.get("displayName") or team.get("name") or "",
         "short": team.get("abbreviation") or team.get("shortDisplayName") or "",
         "logo": team.get("logo") or "",
-        "score": _int(competitor.get("score")),
+        "score": _score_value(competitor),
         "winner": competitor.get("winner"),
     }
 
