@@ -383,7 +383,7 @@ export default function Home() {
           </a>
         </nav>
         <div className="dataStatus">
-          <span className="statusPulse" /> API publique <i /> ESPN · FotMob
+          <span className="statusPulse" /> Flux en direct
         </div>
       </header>
 
@@ -702,7 +702,7 @@ export default function Home() {
 
       <footer className="appFooter">
         <span>© TERRAIN · FOOTBALL INTELLIGENCE</span>
-        <span>DONNÉES PUBLIQUES ESPN & FOTMOB · ESTIMATIONS, JAMAIS DES CERTITUDES</span>
+        <span>DONNÉES STATISTIQUES PUBLIQUES · ESTIMATIONS, JAMAIS DES CERTITUDES</span>
       </footer>
     </main>
   );

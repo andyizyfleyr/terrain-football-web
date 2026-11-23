@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'Terrain — Calendrier & analyse football',
-  description: 'Calendrier mensuel des matchs et estimations de football fondées sur des données publiques ESPN.',
+  description: 'Calendrier mensuel des matchs et estimations statistiques de football.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

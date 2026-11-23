@@ -142,7 +142,7 @@ function formatAttackDefense(statsSide: any, xgSeasonSide: any) {
       )}
       {xgSeasonSide && (
         <span className="xgMiniPill">
-          FotMob : <b>{xgSeasonSide.xgPerMatch}</b> xG/m · <b>{xgSeasonSide.xgaPerMatch}</b> xGA/m ({xgSeasonSide.xPoints} xPts)
+          Saison : <b>{xgSeasonSide.xgPerMatch}</b> xG/m · <b>{xgSeasonSide.xgaPerMatch}</b> xGA/m ({xgSeasonSide.xPoints} xPts)
         </span>
       )}
     </div>
@@ -274,7 +274,6 @@ export function MatchAnalysisPanel({
           </div>
         </div>
         <div className="analysisTopBadges">
-          {fotmob && <span className="fotmobActivePill">ESPN + FOTMOB</span>}
           <span className="estimatePill">ESTIMATION · NON GARANTIE</span>
         </div>
       </div>
@@ -295,7 +294,7 @@ export function MatchAnalysisPanel({
               {referee?.name && (
                 <>
                   <span>·</span>
-                  <span title="Arbitre désigné (FotMob)">⚖ {referee.name}</span>
+                  <span title="Arbitre désigné">⚖ {referee.name}</span>
                 </>
               )}
               <span className={`matchStatusPill ${finished ? 'statusDone' : 'statusUpcoming'}`}>
@@ -338,7 +337,7 @@ export function MatchAnalysisPanel({
                 </div>
                 {realMatchXg && typeof realMatchXg.homeXg === 'number' && (
                   <div className="xgSummary xgRealSummary">
-                    <span>xG RÉELS DU MATCH (FOTMOB)</span>
+                    <span>xG RÉELS DU MATCH</span>
                     <b>{realMatchXg.homeXg}</b>
                     <i>—</i>
                     <b>{realMatchXg.awayXg}</b>
@@ -369,7 +368,7 @@ export function MatchAnalysisPanel({
               <i className="largeSpinner" />
               <div>
                 <b>Analyse en cours</b>
-                <span>Croisement ESPN & FotMob (xG, blessés/suspendus, H2H, arbitre)…</span>
+                <span>Calcul des xG, absences, confrontations directes et indicateurs…</span>
               </div>
             </div>
           )}
@@ -384,10 +383,10 @@ export function MatchAnalysisPanel({
                   <h3>Estimations du match</h3>
                   <small>
                     Forme récente ({freshHome}/5 & {freshAway}/5 matchs)
-                    {fotmob ? ' · xG, effectifs & H2H FotMob intégrés' : ' · sur 60 jours max'}
+                    {fotmob ? ' · xG, effectifs & confrontations intégrés' : ' · sur 60 jours max'}
                   </small>
                 </div>
-                <span className="modelMark">{fotmob ? 'Poisson + xG FotMob' : 'Poisson'}</span>
+                <span className="modelMark">{fotmob ? 'Poisson + xG' : 'Poisson'}</span>
               </div>
               {(freshHome < 5 || freshAway < 5) && (
                 <div className="dataWarning">
@@ -396,11 +395,11 @@ export function MatchAnalysisPanel({
                 </div>
               )}
 
-              {/* Aperçu rapide des absents majeurs directement sur la vue d'ensemble si FotMob signale des blessés/suspendus */}
+              {/* Aperçu rapide des absents majeurs directement sur la vue d'ensemble */}
               {(homeAbsenceCount !== null || awayAbsenceCount !== null) && ((homeAbsenceCount || 0) > 0 || (awayAbsenceCount || 0) > 0) && (
                 <div className="squadQuickBanner">
                   <div className="squadQuickHeader">
-                    <span>✚ EFFECTIFS & ABSENCES (FOTMOB)</span>
+                    <span>✚ EFFECTIFS & ABSENCES</span>
                     <button type="button" onClick={() => setTab('facteurs')}>
                       Voir les 8 facteurs →
                     </button>
@@ -536,7 +535,7 @@ export function MatchAnalysisPanel({
 
               {Array.isArray(fotmob?.insights) && fotmob.insights.length > 0 && (
                 <div className="fotmobInsightsBox">
-                  <span className="sectionKicker">FAITS MARQUANTS · FOTMOB / OPTA</span>
+                  <span className="sectionKicker">FAITS MARQUANTS</span>
                   <ul>
                     {fotmob.insights.slice(0, 4).map((line: string, i: number) => (
                       <li key={i}>{line}</li>
@@ -558,8 +557,7 @@ export function MatchAnalysisPanel({
                 </button>
               </div>
               <p className="legalNote">
-                Les probabilités sont des estimations fondées sur des flux publics (ESPN & FotMob). Elles ne constituent ni conseil de pari
-                ni garantie de résultat.
+                Les probabilités sont des estimations statistiques. Elles ne constituent ni conseil de pari ni garantie de résultat.
               </p>
             </>
           )}
@@ -569,13 +567,12 @@ export function MatchAnalysisPanel({
               <div className="subsectionHeading">
                 <span className="sectionKicker">MÉTHODE RAPIDE EN 5 MINUTES</span>
                 <h3>Les 8 facteurs pris en compte</h3>
-                <p>Données croisées entre ESPN et le flux JSON public FotMob (blessés/suspendus, vrais xG, H2H multi-saisons, arbitre).</p>
+                <p>Synthèse des indicateurs clés de la rencontre (forme, blessés/suspendus, xG, confrontations directes, arbitre).</p>
               </div>
               <div className="factorGrid">
                 <FactorCard
                   number="01"
                   title="Forme récente · 5 matchs max"
-                  badge="ESPN"
                   leftLabel={fixture.home?.name}
                   rightLabel={fixture.away?.name}
                   left={<p>{factors.forme?.home}</p>}
@@ -588,7 +585,6 @@ export function MatchAnalysisPanel({
                 <FactorCard
                   number="02"
                   title="Domicile / extérieur"
-                  badge="ESPN"
                   leftLabel="À domicile"
                   rightLabel="À l’extérieur"
                   left={<p>{factors.domicileExterieur?.home}</p>}
@@ -597,7 +593,6 @@ export function MatchAnalysisPanel({
                 <FactorCard
                   number="03"
                   title="Confrontations directes"
-                  badge={factors.h2h?.source === 'FotMob' ? 'FotMob' : 'ESPN'}
                   left={factors.h2h?.resume}
                   extra={
                     Array.isArray(factors.h2h?.detail) && factors.h2h.detail.length > 0 ? (
@@ -618,7 +613,6 @@ export function MatchAnalysisPanel({
                 <FactorCard
                   number="04"
                   title="Blessés / suspendus"
-                  badge={Array.isArray(factors.blessures?.homePlayers) ? 'FotMob' : 'ESPN'}
                   leftLabel={fixture.home?.short || fixture.home?.name}
                   rightLabel={fixture.away?.short || fixture.away?.name}
                   left={<AbsenceChips players={factors.blessures?.homePlayers} fallbackText={factors.blessures?.home} />}
@@ -628,7 +622,6 @@ export function MatchAnalysisPanel({
                 <FactorCard
                   number="05"
                   title="Enjeu & classement"
-                  badge="ESPN"
                   leftLabel={fixture.home?.short}
                   rightLabel={fixture.away?.short}
                   left={
@@ -651,7 +644,6 @@ export function MatchAnalysisPanel({
                 <FactorCard
                   number="06"
                   title="Style de jeu récent"
-                  badge="ESPN"
                   leftLabel={fixture.home?.short}
                   rightLabel={fixture.away?.short}
                   left={styleSummary(factors.style?.home)}
@@ -660,8 +652,7 @@ export function MatchAnalysisPanel({
                 />
                 <FactorCard
                   number="07"
-                  title="Attaque, défense & vrais xG"
-                  badge={xgSaison?.home || realMatchXg ? 'ESPN + FotMob' : 'ESPN'}
+                  title="Attaque, défense & xG"
                   leftLabel={fixture.home?.short}
                   rightLabel={fixture.away?.short}
                   left={formatAttackDefense(factors.stats?.home, xgSaison?.home)}
@@ -671,7 +662,6 @@ export function MatchAnalysisPanel({
                 <FactorCard
                   number="08"
                   title="Météo, repos, arbitre & bancs"
-                  badge={fotmob ? 'ESPN + FotMob' : 'ESPN'}
                   leftLabel={fixture.home?.short}
                   rightLabel={fixture.away?.short}
                   left={
@@ -696,7 +686,7 @@ export function MatchAnalysisPanel({
               <div className="fiveMinuteNote">
                 <b>Lecture rapide</b>
                 <span>
-                  Les absences (blessés/suspendus) et les vrais xG/xGA FotMob ajustent directement les buts attendus (λ) du modèle de
+                  Les absences (blessés/suspendus) et les xG/xGA de la saison ajustent directement les buts attendus (λ) du modèle de
                   Poisson. Vérifiez toujours le onze officiel publié 1h avant le coup d’envoi.
                 </span>
               </div>
@@ -742,7 +732,7 @@ export function MatchAnalysisPanel({
           <i className="largeSpinner" />
           <div>
             <b>Chargement de la rencontre…</b>
-            <span>Récupération des informations ESPN & FotMob…</span>
+            <span>Récupération des données de la rencontre…</span>
           </div>
         </div>
       ) : (
