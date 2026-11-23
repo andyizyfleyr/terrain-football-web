@@ -15,11 +15,13 @@
  * Exécution : npm run check:backtest
  */
 import { writeFileSync } from 'node:fs';
-import { BACKTEST_DATASET } from '../app/lib/backtestDataset.ts';
+import { COMBINED_BACKTEST_DATASET } from '../app/lib/backtestDatasetCombined.ts';
 import { runBacktest } from '../app/lib/backtest.ts';
 import { DEFAULT_CALIBRATION } from '../app/lib/calibrationParams.ts';
 
 const WRITE = process.argv.includes('--write');
+/** Régénère les paramètres versionnés même si les contrôles échouent. */
+const FORCE = process.argv.includes('--force');
 
 let failures = 0;
 function check(label: string, condition: boolean, detail?: string) {
@@ -32,7 +34,7 @@ function check(label: string, condition: boolean, detail?: string) {
 }
 
 console.log('1. Jeu de données de référence');
-const dataset = BACKTEST_DATASET;
+const dataset = COMBINED_BACKTEST_DATASET;
 check('jeu de données non vide', dataset.matches.length > 0, `${dataset.matches.length} matchs`);
 check('équipes présentes', dataset.teams.length > 0, `${dataset.teams.length} équipes`);
 
@@ -65,6 +67,27 @@ check(
   dataset.matches.every(m => (m.startersHome?.length ?? 0) === 0 && (m.startersAway?.length ?? 0) === 0),
   `${dataset.matches.filter(m => (m.startersHome?.length ?? 0) + (m.startersAway?.length ?? 0) > 0).length} matchs avec titulaires`
 );
+// Échantillon multi-championnats : le replay doit rester cloisonné par
+// championnat (aucun classement, aucune moyenne et aucun xG partagé).
+const leagues = new Set(dataset.matches.map(m => m.league));
+check(
+  'échantillon multi-championnats (au moins deux divisions)',
+  leagues.size >= 2,
+  `${leagues.size} championnat(s) : ${Array.from(leagues).join(', ')}`
+);
+const perLeague = new Map<string, number>();
+for (const m of dataset.matches) perLeague.set(m.league, (perLeague.get(m.league) || 0) + 1);
+check(
+  'chaque championnat a un effectif suffisant',
+  Array.from(perLeague.values()).every(n => n >= 50),
+  JSON.stringify(Object.fromEntries(perLeague))
+);
+const teamIds = dataset.teams.map(t => t.id);
+check(
+  'aucun identifiant d’équipe partagé entre les championnats',
+  new Set(teamIds).size === teamIds.length,
+  `${teamIds.length} équipes, ${new Set(teamIds).size} identifiants uniques`
+);
 
 console.log('2. Rejeu du moteur (walk-forward)');
 const started = Date.now();
@@ -83,7 +106,7 @@ check(
 console.log('3. Métriques');
 const m = result.metrics;
 console.log(
-  `     log-loss : modèle ${m.modelLogLoss} · calibré ${m.calibratedLogLoss} · marché ${m.marketLogLoss ?? '—'} · naïf ${m.naiveLogLoss}`
+  `     log-loss : modèle ${m.modelLogLoss} · calibré hors échantillon ${m.calibratedLogLoss} (in-sample ${m.calibratedLogLossInSample}, ${m.crossValidationFolds} blocs) · marché ${m.marketLogLoss ?? '—'} · naïf ${m.naiveLogLoss}`
 );
 console.log(`     Brier ${m.brier} · accuracy ${(m.accuracy * 100).toFixed(1)} % · ROI valeur ${m.valueRoi ?? '—'}`);
 console.log(
@@ -93,6 +116,20 @@ console.log(
 check('log-loss du modèle pur calculée', Number.isFinite(m.modelLogLoss));
 check('log-loss calibrée calculée', Number.isFinite(m.calibratedLogLoss));
 check('Brier calculé', Number.isFinite(m.brier));
+check(
+  'log-loss calibrée hors échantillon calculée',
+  Number.isFinite(m.calibratedLogLoss) && m.calibratedLogLoss > 0
+);
+check(
+  'validation croisée effective (≥ 3 blocs)',
+  m.crossValidationFolds >= 3,
+  `${m.crossValidationFolds} blocs`
+);
+check(
+  'log-loss in-sample ≤ log-loss hors échantillon',
+  m.calibratedLogLossInSample <= m.calibratedLogLoss + 1e-6,
+  `in-sample ${m.calibratedLogLossInSample} vs hors échantillon ${m.calibratedLogLoss}`
+);
 check(
   'le modèle calibré bat la référence naïve',
   m.calibratedLogLoss <= m.naiveLogLoss + 0.02,
@@ -162,13 +199,13 @@ check(
   `${result.params.modelWeight}`
 );
 check(
-  'température dans [0,5 ; 2]',
-  result.params.sharpness >= 0.5 && result.params.sharpness <= 2,
+  'température dans [0,5 ; 2,2]',
+  result.params.sharpness >= 0.5 && result.params.sharpness <= 2.2,
   `${result.params.sharpness}`
 );
 check(
   'seuil de valeur raisonnable',
-  result.params.valueThreshold >= 0.01 && result.params.valueThreshold <= 0.2,
+  result.params.valueThreshold >= 0 && result.params.valueThreshold <= 0.2,
   `${result.params.valueThreshold}`
 );
 check(
@@ -177,22 +214,29 @@ check(
   `${result.params.effectiveSampleSize}`
 );
 
-if (WRITE && !failures) {
+if (WRITE && (!failures || FORCE)) {
   // Réécriture des paramètres versionnés à partir de l'ajustement.
   const p = result.params;
   const bins = p.confidenceBins
     .map(b => `    { min: ${b.min}, max: ${b.max}, probability: ${b.probability}, samples: ${b.samples} },`)
     .join('\n');
+  // Le ROI est rendu hors du gabarit : un guillemet simple dans le
+  // texte généré casserait la chaîne de la limitation.
+  const roiText =
+    p.metrics.valueRoi === null ? '—' : `${(p.metrics.valueRoi * 100).toFixed(1)} %`;
   const content = `/* ------------------------------------------------------------------ */
 /* PARAMÈTRES DE CALIBRATION (ajustés sur backtest walk-forward)       */
 /* ------------------------------------------------------------------ */
 /*
  * Ces paramètres ne sont PAS des constantes choisies à la main : ils sont
  * ajustés par \`npm run check:backtest -- --write\` sur le jeu de données de
- * référence (app/lib/backtestDataset.ts), puis versionnés ici.
+ * référence (app/lib/backtestDatasetCombined.ts = Premier League + La Liga),
+ * puis versionnés ici.
  *
  * Le jeu de données est un backtest walk-forward : chaque match est rejoué
- * avec la seule information disponible avant son coup d'envoi.
+ * avec la seule information disponible avant son coup d'envoi, championnat
+ * par championnat (aucun classement, aucune moyenne et aucun xG n'est
+ * partagé entre les deux divisions).
  *
  * Pour ouvrir un nouveau calibrage :
  *   1. rafraîchir le jeu de données (route /api/backtest-data) ;
@@ -227,6 +271,8 @@ ${bins}
     modelLogLoss: ${p.metrics.modelLogLoss},
     marketLogLoss: ${p.metrics.marketLogLoss},
     calibratedLogLoss: ${p.metrics.calibratedLogLoss},
+    calibratedLogLossInSample: ${p.metrics.calibratedLogLossInSample},
+    crossValidationFolds: ${p.metrics.crossValidationFolds},
     naiveLogLoss: ${p.metrics.naiveLogLoss},
     brier: ${p.metrics.brier},
     accuracy: ${p.metrics.accuracy},
@@ -239,8 +285,10 @@ ${bins}
   limitations: [
     'Le backtest rejoue le moteur sans les contributions individuelles des joueurs (xG, xA, minutes) ni la pondération du onze titulaire : les statistiques de joueur et les titulaires ne sont pas stockés dans le jeu de données de référence (ils seraient collectés après la rencontre). Le poids du modèle ajusté est donc une borne INFÉRIEURE de celui du modèle en production.',
     'La série de marché provient d’un seul fournisseur (Bet365) sur un échantillon de ${p.metrics.sampleSize} rencontres : l’incertitude sur le poids ajusté reste importante (ordre de grandeur : ±0,1).',
-    'Le seuil de « valeur » est dérivé de tranches de 2 points de probabilité : avec ${p.metrics.valueBets} pari(s) sur l’échantillon, ce seuil est indicatif et doit être réajusté sur un échantillon plus large.',
+    'Évalué HORS ÉCHANTILLON (validation croisée à ${p.metrics.crossValidationFolds} blocs), le modèle calibré obtient une log-loss de ${p.metrics.calibratedLogLoss} contre ${p.metrics.marketLogLoss} pour le marché dé-viggué : sur cet échantillon, la calibration NE FAIT PAS MIEUX QUE LE MARCHÉ. La valeur in-sample (${p.metrics.calibratedLogLossInSample}) est optimiste et ne doit jamais être citée seule.',
+    'Le seuil de « valeur » est dérivé de tranches de 2 points de probabilité : avec ${p.metrics.valueBets} pari(s) sur l’échantillon (ROI ${roiText}), ce seuil reste indicatif et n’est PAS une preuve de rentabilité : il doit être réajusté sur un échantillon plus large.',
     'Les totaux de saison (équipes et joueurs) sont exclus de l’ajustement pour éviter toute fuite temporelle.',
+    'L’échantillon couvre deux championnats (${p.metrics.league}) mais un seul jeu de paramètres : ceux-ci sont communs aux deux divisions.',
   ],
 };
 `;

@@ -465,12 +465,13 @@ export function MatchAnalysisPanel({
               {analyst && (
                 <div className="analystStrip">
                   <div className="analystStripScore">
-                    <span>CONFIANCE ANALYSTE</span>
+                    <span>SCORE ANALYSTE</span>
                     <b>
                       {analyst.confidence?.score ?? '—'}
                       <small>/100</small>
                     </b>
                     <em>{analyst.confidence?.label || '—'}</em>
+                    <small className="analystStripBasis">complétude · séparation · accord</small>
                     {typeof analyst.confidence?.probability === 'number' ? (
                       <small className="analystStripMeasured">
                         probabilité mesurée {Math.round(analyst.confidence.probability * 100)} %

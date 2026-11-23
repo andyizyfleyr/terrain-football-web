@@ -149,8 +149,19 @@ export type BacktestMatch = {
 };
 
 export type BacktestDataset = {
+  /**
+   * Libellé du jeu de données. Pour un jeu multi-championnats, il
+   * regroupe les Championnat concerned (ex. « eng.1 + esp.1 »).
+   */
   league: string;
   period: string;
+  /**
+   * Championnats couverts. Si absent, on déduit un seul championnat
+   * depuis `league` (cas historique). Chaque championnat est rejoué
+   * INDÉPENDAMMENT : classement, forme, moyennes et xG ne sont jamais
+   * mélangés entre championnats.
+   */
+  leagues?: string[];
   teams: BacktestTeamSnapshot[];
   matches: BacktestMatch[];
 };
@@ -158,6 +169,8 @@ export type BacktestDataset = {
 export type BacktestSample = {
   matchId: string;
   date: string;
+  /** Championnat de la rencontre (pour les diagnostics par ligue). */
+  league: string;
   outcome: 0 | 1 | 2;
   model: OutcomeProbs;
   market: OutcomeProbs | null;
@@ -231,11 +244,108 @@ function emptyAggregate(id: number, name: string): TeamAggregate {
 /**
  * Reconstruit l'état du championnat AVANT chaque match (cumulatif),
  * puis les entrées du moteur.
+ *
+ * MULTI-CHAMPIONNATS : le replay est fait LIGUE PAR LIGUE. Le
+ * classement, les moyennes de buts et les xG ne sont jamais mélangés
+ * entre championnats — une rencontre de La Liga ne doit jamais voir le
+ * classement de Premier League. Les rencontres sont ensuite ré-assemblées
+ * par date pour l'évaluation conjointe.
  */
 export function buildWalkForwardInputs(
   dataset: BacktestDataset
 ): { inputs: AnalystInput[]; naive: OutcomeProbs[] } {
   const matches = dataset.matches.slice().sort((a, b) => a.date.localeCompare(b.date));
+
+  const snapshots = new Map<number, BacktestTeamSnapshot>();
+  for (const t of dataset.teams) snapshots.set(t.id, t);
+
+  // Regroupement par championnat (l'ordre global par date est conservé).
+  const groups = new Map<string, BacktestMatch[]>();
+  for (const match of matches) {
+    const key = match.league || dataset.league;
+    const list = groups.get(key);
+    if (list) list.push(match);
+    else groups.set(key, [match]);
+  }
+
+  // Rejeu indépendant par championnat.
+  const byId = new Map<string, { input: AnalystInput; naive: OutcomeProbs }>();
+  groups.forEach((group, league) => {
+    const built = buildLeagueWalkForward(group, snapshots, league);
+    group.forEach((match, index) => {
+      byId.set(match.id, { input: built.inputs[index], naive: built.naive[index] });
+    });
+  });
+
+  const inputs: AnalystInput[] = [];
+  const naive: OutcomeProbs[] = [];
+  for (const match of matches) {
+    const entry = byId.get(match.id);
+    inputs.push(entry ? entry.input : emptyInput(match));
+    naive.push(entry ? entry.naive : { home: 1 / 3, draw: 1 / 3, away: 1 / 3 });
+  }
+  return { inputs, naive };
+}
+
+/** Entrée de repli : le match n'a pas pu être rejoué. */
+function emptyInput(match: BacktestMatch): AnalystInput {
+  return {
+    matchId: match.id,
+    kickoffIso: `${match.date}T15:00:00.000Z`,
+    baseLambdas: { home: 1.3, away: 1.15 },
+    covarianceSamples: [],
+    halfTimeSamples: [],
+    market: match.odds
+      ? { ...match.odds, format: 'decimal', source: 'Backtest', providerLabel: match.provider }
+      : null,
+    referee: null,
+    weather: match.weather ?? null,
+    h2h: null,
+    league: { rowsAll: [], rowsHome: [], rowsAway: [], xgRows: [], legend: [] },
+    home: {
+      teamId: match.homeId,
+      name: match.homeName,
+      tableAll: null,
+      tableHome: null,
+      tableAway: null,
+      xgRow: null,
+      recentMatches: [],
+      stats: {},
+      squad: [],
+      absences: [],
+      lineup: null,
+      formation: null,
+      playerStats: {},
+    },
+    away: {
+      teamId: match.awayId,
+      name: match.awayName,
+      tableAll: null,
+      tableHome: null,
+      tableAway: null,
+      xgRow: null,
+      recentMatches: [],
+      stats: {},
+      squad: [],
+      absences: [],
+      lineup: null,
+      formation: null,
+      playerStats: {},
+    },
+  };
+}
+
+/**
+ * Rejeu d'un championnat : pour chaque rencontre, l'état du championnat
+ * est reconstruit à partir des seules rencontres ANTÉRIEURES de ce
+ * championnat.
+ */
+function buildLeagueWalkForward(
+  leagueMatches: BacktestMatch[],
+  snapshots: Map<number, BacktestTeamSnapshot>,
+  league: string
+): { inputs: AnalystInput[]; naive: OutcomeProbs[] } {
+  const matches = leagueMatches;
   const teamNames = new Map<number, string>();
   for (const m of matches) {
     teamNames.set(m.homeId, m.homeName);
@@ -244,8 +354,6 @@ export function buildWalkForwardInputs(
 
   const aggregates = new Map<number, TeamAggregate>();
   teamNames.forEach((name, id) => aggregates.set(id, emptyAggregate(id, name)));
-  const snapshots = new Map<number, BacktestTeamSnapshot>();
-  for (const t of dataset.teams) snapshots.set(t.id, t);
 
   const inputs: AnalystInput[] = [];
   const naive: OutcomeProbs[] = [];
@@ -264,6 +372,11 @@ export function buildWalkForwardInputs(
     const leagueHomeGoals = shrunkMean(history.map(m => m.homeGoals), 1.45, 5);
     const leagueAwayGoals = shrunkMean(history.map(m => m.awayGoals), 1.15, 5);
     const leagueTeamGoals = (leagueHomeGoals + leagueAwayGoals) / 2;
+    // Un but marqué à domicile n'est pas le même objet qu'un but marqué à
+    // l'extérieur : on conserve deux références distinctes pour que les
+    // ratios d'attaque et de défense soient comparés à la bonne base.
+    const leagueHomeConceded = leagueAwayGoals;
+    const leagueAwayConceded = leagueHomeGoals;
 
     // --- Agrégats cumulés par équipe -----------------------------------
     for (const past of history) {
@@ -337,21 +450,30 @@ export function buildWalkForwardInputs(
     const homeSnapshot = snapshots.get(match.homeId);
     const awaySnapshot = snapshots.get(match.awayId);
 
+    // Référence de comparaison de chaque ratio :
+    //   - attaque à domicile  → moyenne des buts marqués à domicile ;
+    //   - défense à l'extérieur → moyenne des buts encaissés à l'extérieur ;
+    //   - attaque à l'extérieur → moyenne des buts marqués à l'extérieur ;
+    //   - défense à domicile → moyenne des buts encaissés à domicile.
+    // Comparer chaque ratio à la moyenne GLOBALE (moyenne de tous les
+    // buts du championnat) revient à surestimer l'attaque à domicile et
+    // à sous-estimer l'attaque à l'extérieur : c'est un biais
+    // systématique en faveur du favoured, Amplifié à chaque match.
     const homeAttackRel =
-      homeAgg.homePlayed > 0 && leagueTeamGoals > 0
-        ? shrunkRatio(homeAgg.homeGoals / homeAgg.homePlayed, leagueTeamGoals, homeAgg.homePlayed)
+      homeAgg.homePlayed > 0 && leagueHomeGoals > 0
+        ? shrunkRatio(homeAgg.homeGoals / homeAgg.homePlayed, leagueHomeGoals, homeAgg.homePlayed)
         : 1;
     const awayDefenceRel =
-      awayAgg.awayPlayed > 0 && leagueTeamGoals > 0
-        ? shrunkRatio(awayAgg.awayConceded / awayAgg.awayPlayed, leagueTeamGoals, awayAgg.awayPlayed)
+      awayAgg.awayPlayed > 0 && leagueAwayConceded > 0
+        ? shrunkRatio(awayAgg.awayConceded / awayAgg.awayPlayed, leagueAwayConceded, awayAgg.awayPlayed)
         : 1;
     const awayAttackRel =
-      awayAgg.awayPlayed > 0 && leagueTeamGoals > 0
-        ? shrunkRatio(awayAgg.awayGoals / awayAgg.awayPlayed, leagueTeamGoals, awayAgg.awayPlayed)
+      awayAgg.awayPlayed > 0 && leagueAwayGoals > 0
+        ? shrunkRatio(awayAgg.awayGoals / awayAgg.awayPlayed, leagueAwayGoals, awayAgg.awayPlayed)
         : 1;
     const homeDefenceRel =
-      homeAgg.homePlayed > 0 && leagueTeamGoals > 0
-        ? shrunkRatio(homeAgg.homeConceded / homeAgg.homePlayed, leagueTeamGoals, homeAgg.homePlayed)
+      homeAgg.homePlayed > 0 && leagueHomeConceded > 0
+        ? shrunkRatio(homeAgg.homeConceded / homeAgg.homePlayed, leagueHomeConceded, homeAgg.homePlayed)
         : 1;
 
     const baseLambdas = {
@@ -359,7 +481,11 @@ export function buildWalkForwardInputs(
       away: Math.max(0.15, leagueAwayGoals * awayAttackRel * homeDefenceRel),
     };
 
-    const naiveProbs = poissonOutcomeProbs(baseLambdas.home, baseLambdas.away);
+    // Référence naïve : les MOYENNES DE CHAMPIONNAT seules, sans aucune
+    // information d'équipe. C'est le point de comparaison honnête du
+    // modèle : on mesure l'apport des ratios d'équipe, pas celui d'une
+    // référence qui les contient déjà.
+    const naiveProbs = poissonOutcomeProbs(leagueHomeGoals, leagueAwayGoals);
 
     const recentFor = (id: number) =>
       historyFor(id)
@@ -490,7 +616,7 @@ export function buildWalkForwardInputs(
         : null,
       weather: match.weather ?? null,
       h2h: null,
-      league: { rowsAll, rowsHome, rowsAway, xgRows: rowsAll, legend: [] },
+      league: { rowsAll, rowsHome, rowsAway, xgRows: rowsAll, legend: [], name: league },
       home: {
         teamId: match.homeId,
         name: match.homeName,
@@ -624,6 +750,7 @@ export function runBacktest(
     samples.push({
       matchId: match.id,
       date: match.date,
+      league: match.league || dataset.league,
       outcome,
       model,
       market,
@@ -645,16 +772,26 @@ export function runBacktest(
 /* Évaluation & ajustement                                              */
 /* ------------------------------------------------------------------ */
 
-export function evaluateSamples(
-  samples: BacktestSample[],
-  dataset: BacktestDataset,
-  calibrationOverride?: Partial<CalibrationParams>
-): BacktestResult {
-  const notes: string[] = [];
+/**
+ * Ajuste le poids du modèle et la température par balayage de la
+ * log-loss calibrée.
+ *
+ * La surface de perte est très plate autour de l'optimum (le poids et
+ * la température se compensent partiellement) : on retient donc, parmi
+ * les couples équivalents à 5·10⁻⁴ de log-loss près du minimum, celui
+ * dont la température est la plus proche de 1 (valeur neutre). Sans
+ * cette règle de parcimonie, l'ajustement glisse vers la borne de la
+ * grille et le paramètre devient ininterprétable.
+ */
+export function fitBlendParams(
+  samples: BacktestSample[]
+): { weight: number; sharpness: number; loss: number } | null {
+  if (!samples.length) return null;
+  const tolerance = 5e-4;
+  let min = Infinity;
+  const grid: { weight: number; sharpness: number; loss: number }[] = [];
 
-  // --- 1. Température & poids du marché : minimisation de la log-loss ---
-  let best: { weight: number; sharpness: number; loss: number } | null = null;
-  for (let sharpness = 0.4; sharpness <= 2.0001; sharpness += 0.05) {
+  for (let sharpness = 0.4; sharpness <= 2.2001; sharpness += 0.05) {
     for (let weight = 0; weight <= 1.0001; weight += 0.02) {
       let loss = 0;
       let n = 0;
@@ -668,16 +805,76 @@ export function evaluateSamples(
         n += 1;
       }
       const mean = n ? loss / n : Infinity;
-      if (!best || mean < best.loss) best = { weight, sharpness, loss: mean };
+      grid.push({ weight, sharpness, loss: mean });
+      if (mean < min) min = mean;
     }
   }
+
+  const near = grid
+    .filter(g => g.loss <= min + tolerance)
+    .sort((a, b) => Math.abs(a.sharpness - 1) - Math.abs(b.sharpness - 1) || a.loss - b.loss);
+  return near[0] ?? null;
+}
+
+/**
+ * Log-loss calibrée hors échantillon : pour chaque bloc, les paramètres
+ * sont ajustés sur les autres blocs puis évalués sur le bloc écarté.
+ */
+export function crossValidatedLogLoss(samples: BacktestSample[], folds: number): number {
+  if (samples.length < 20 || folds < 2) {
+    let loss = 0;
+    for (const sample of samples) {
+      loss += logLoss(
+        applyCalibration(sample.model, sample.market, { sharpness: 1, modelWeight: 0 } as CalibrationParams).probs,
+        sample.outcome
+      );
+    }
+    return samples.length ? loss / samples.length : 0;
+  }
+
+  let total = 0;
+  let count = 0;
+  for (let fold = 0; fold < folds; fold++) {
+    const train = samples.filter((_, index) => index % folds !== fold);
+    const test = samples.filter((_, index) => index % folds === fold);
+    if (!train.length || !test.length) continue;
+    const best = fitBlendParams(train);
+    if (!best) continue;
+    for (const sample of test) {
+      const probs = applyCalibration(
+        sample.model,
+        sample.market,
+        { sharpness: best.sharpness, modelWeight: best.weight } as CalibrationParams
+      ).probs;
+      total += logLoss(probs, sample.outcome);
+      count += 1;
+    }
+  }
+  return count ? total / count : 0;
+}
+
+export function evaluateSamples(
+  samples: BacktestSample[],
+  dataset: BacktestDataset,
+  calibrationOverride?: Partial<CalibrationParams>
+): BacktestResult {
+  const notes: string[] = [];
+
+  // --- 1. Température & poids du marché : minimisation de la log-loss ---
+  const best = fitBlendParams(samples);
 
   const modelWeight = calibrationOverride?.modelWeight ?? best?.weight ?? 0.6;
   const sharpness = calibrationOverride?.sharpness ?? best?.sharpness ?? 1;
 
-  // --- 2. Seuil de « valeur » : premier palier d'edge au ROI positif ---
+  // --- 2. Seuil de « valeur » : plus petit seuil au ROI cumulé positif ---
   const edgeBuckets = computeEdgeBuckets(samples, modelWeight, sharpness);
-  const valueThreshold = calibrationOverride?.valueThreshold ?? deriveValueThreshold(edgeBuckets);
+  const derived = deriveValueThreshold(samples, modelWeight, sharpness);
+  const valueThreshold = calibrationOverride?.valueThreshold ?? derived.threshold;
+  if (!derived.demonstrated) {
+    notes.push(
+      `Aucun seuil d\'edge ne démontre un ROI positif sur cet échantillon (${derived.bets} pari(s) à edge positif, ROI ${((derived.roi ?? 0) * 100).toFixed(1)} %). Le seuil de valeur retenu est le seuil minimal : le signal « valeur » n\'est PAS validé empiriquement.`
+    );
+  }
 
   // --- 3. Confiance : régression logistique ----------------------------
   const logistic = calibrationOverride?.logistic ?? fitLogistic(samples);
@@ -716,13 +913,21 @@ export function evaluateSamples(
   }
 
   const n = samples.length || 1;
+  // Log-loss calibrée HORS ÉCHANTILLON : les paramètres sont ajustés sur
+  // k-1 blocs et évalués sur le bloc écarté. Sans cela, on mesure la
+  // qualité de l'ajustement sur les matchs qui l'ont produit, pas sa
+  // capacité à se généraliser.
+  const folds = samples.length >= 100 ? 5 : samples.length >= 40 ? 4 : 3;
+  const crossValidated = crossValidatedLogLoss(samples, folds);
   const metrics: CalibrationMetrics = {
     sampleSize: samples.length,
     league: dataset.league,
     period: dataset.period,
     modelLogLoss: Number((modelLoss / n).toFixed(4)),
     marketLogLoss: marketN ? Number((marketLossSum / marketN).toFixed(4)) : null,
-    calibratedLogLoss: Number((calibratedLoss / n).toFixed(4)),
+    calibratedLogLoss: Number(crossValidated.toFixed(4)),
+    calibratedLogLossInSample: Number((calibratedLoss / n).toFixed(4)),
+    crossValidationFolds: folds,
     naiveLogLoss: Number((naiveLoss / n).toFixed(4)),
     brier: Number((brier / n).toFixed(4)),
     accuracy: Number((correct / n).toFixed(4)),
@@ -743,7 +948,7 @@ export function evaluateSamples(
     );
   }
   notes.push(
-    `Log-loss : modèle pur ${metrics.modelLogLoss} · calibré ${metrics.calibratedLogLoss} · marché ${metrics.marketLogLoss ?? '—'} · naïf ${metrics.naiveLogLoss}.`
+    `Log-loss : modèle pur ${metrics.modelLogLoss} · calibré hors échantillon ${metrics.calibratedLogLoss} (in-sample ${metrics.calibratedLogLossInSample}, ${metrics.crossValidationFolds} blocs) · marché ${metrics.marketLogLoss ?? '—'} · naïf ${metrics.naiveLogLoss}.`
   );
   notes.push(
     'Ajustement sans fuite temporelle : seuls les cumuls antérieurs, les absences et les compositions confirmées sont utilisés ; les totaux de saison collectés après coup sont exclus.'
@@ -837,15 +1042,31 @@ function computeEdgeBuckets(
   return buckets;
 }
 
-function deriveValueThreshold(buckets: BacktestResult['edgeBuckets']): number {
-  // On retient le plus petit seuil (en unités de probabilité) à partir
-  // duquel le ROI reste positif sur toutes les tranches supérieures, avec
-  // un minimum de 8 paris par tranche.
-  for (const bucket of buckets) {
-    if (!bucket.samples || bucket.samples < 8) continue;
-    if (bucket.roi > 0) return Number(bucket.min.toFixed(4));
+/**
+ * Seuil de « valeur » : le plus petit seuil d'edge (en unités de
+ * probabilité) tel que le ROI CUMULÉ de tous les paris au-delà de ce
+ * seuil soit positif, avec au moins 8 paris.
+ *
+ * Le ROI cumulé est utilisé (et non le ROI de la seule tranche) parce
+ * que c'est exactement ce que l'utilisateur applique : parier
+ * sur tout ce qui dépasse le seuil. Si aucun seuil ne satisfait ces
+ * deux conditions, on retient le seuil minimal et on signale
+ * explicitement que le signal « valeur » n'est pas démontré.
+ */
+function deriveValueThreshold(
+  samples: BacktestSample[],
+  modelWeight: number,
+  sharpness: number
+): { threshold: number; roi: number | null; bets: number; demonstrated: boolean } {
+  const candidates = [0, 0.02, 0.04, 0.06, 0.09, 0.13];
+  for (const threshold of candidates) {
+    const stats = computeValueRoi(samples, modelWeight, sharpness, threshold);
+    if (stats.bets >= 8 && (stats.roi ?? 0) > 0) {
+      return { threshold, roi: stats.roi, bets: stats.bets, demonstrated: true };
+    }
   }
-  return 0.08;
+  const fallback = computeValueRoi(samples, modelWeight, sharpness, 0);
+  return { threshold: 0, roi: fallback.roi, bets: fallback.bets, demonstrated: false };
 }
 
 function computeValueRoi(

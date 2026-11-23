@@ -566,3 +566,4 @@
   .calibrationGrid{grid-template-columns:1fr}
   .calibrationTwoCol{grid-template-columns:1fr}
 }
+.analystStripScore>small.analystStripBasis{display:block;margin-top:2px;color:#9aa79f;font:500 7.5px 'DM Mono',monospace;letter-spacing:.3px;text-transform:uppercase}

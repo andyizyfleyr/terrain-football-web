@@ -229,7 +229,9 @@ export function AnalystReportView({ analyst }: { analyst: any }) {
           <h3>Calibrage hors échantillon, métriques et marges d&apos;incertitude</h3>
           <p>
             Les paramètres appliqués ne sont pas choisis à la main : ils sont ajustés sur un backtest walk-forward
-            (chaque rencontre rejouée avec la seule information disponible avant son coup d&apos;envoi) puis versionnés.
+            (chaque rencontre rejouée avec la seule information disponible avant son coup d&apos;envoi, championnat par
+            championnat) puis versionnés. Les métriques ci-dessous sont évaluées <strong>hors échantillon</strong> :
+            les paramètres sont ajustés sur k blocs et évalués sur le bloc écarté.
           </p>
         </div>
 
@@ -274,9 +276,14 @@ export function AnalystReportView({ analyst }: { analyst: any }) {
                 'qualité probabiliste du modèle seul',
               ],
               [
-                'Log-loss calibré',
+                'Log-loss calibré (hors échantillon)',
                 calibration.calibratedLogLoss,
-                'modèle + marché ajustés',
+                `validation croisée (${calibration.crossValidationFolds ?? '—'} blocs)`,
+              ],
+              [
+                'Log-loss calibré (in-sample)',
+                calibration.calibratedLogLossInSample,
+                'optimiste : ajustement et mesure sur le même échantillon',
               ],
               [
                 'Log-loss marché',

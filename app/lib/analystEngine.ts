@@ -239,6 +239,8 @@ export type AnalystLeagueInput = {
   rowsAway: AnalystTableRow[];
   xgRows: AnalystTableRow[];
   legend: { title: string; indices: number[] }[];
+  /** Libellé du championnat (facultatif). */
+  name?: string;
 };
 
 export type AnalystInput = {
@@ -313,7 +315,12 @@ export type AnalystReport = {
     period: string;
     modelLogLoss: number;
     marketLogLoss: number | null;
+    /** Log-loss calibrée hors échantillon (validation croisée). */
     calibratedLogLoss: number;
+    /** Log-loss calibrée ajustée ET évaluée sur le même échantillon. */
+    calibratedLogLossInSample: number;
+    /** Nombre de blocs de validation croisée. */
+    crossValidationFolds: number;
     naiveLogLoss: number;
     brier: number;
     accuracy: number;
@@ -2198,6 +2205,8 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
       modelLogLoss: calibration.metrics.modelLogLoss,
       marketLogLoss: calibration.metrics.marketLogLoss,
       calibratedLogLoss: calibration.metrics.calibratedLogLoss,
+      calibratedLogLossInSample: calibration.metrics.calibratedLogLossInSample,
+      crossValidationFolds: calibration.metrics.crossValidationFolds,
       naiveLogLoss: calibration.metrics.naiveLogLoss,
       brier: calibration.metrics.brier,
       accuracy: calibration.metrics.accuracy,

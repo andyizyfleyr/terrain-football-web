@@ -32,8 +32,18 @@ export type CalibrationMetrics = {
   modelLogLoss: number;
   /** Log-loss du marché dé-viggué (null si aucune cote disponible). */
   marketLogLoss: number | null;
-  /** Log-loss du modèle calibré (mélange + température). */
+  /**
+   * Log-loss du modèle calibré (mélange + température), évalué HORS
+   * ÉCHANTILLON : les paramètres sont ajustés sur k-1 blocs et évalués
+   * sur le bloc retenu (validation croisée). C'est le chiffre à
+   * regarder : il mesure ce que le calibration fait sur des matchs
+   * qu'elle n'a pas vus.
+   */
   calibratedLogLoss: number;
+  /** Log-loss du modèle calibré ajusté ET évalué sur le même échantillon. */
+  calibratedLogLossInSample: number;
+  /** Nombre de blocs de validation croisée utilisés. */
+  crossValidationFolds: number;
   /** Log-loss d'une référence naïve (moyennes de la league). */
   naiveLogLoss: number;
   brier: number;
