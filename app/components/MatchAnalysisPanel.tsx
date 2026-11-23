@@ -36,18 +36,22 @@ function ProbBar({ label, value, color = 'var(--green)' }: { label: string; valu
 function FactorCard({
   number,
   title,
+  badge,
   leftLabel,
   rightLabel,
   left,
   right,
+  extra,
   note,
 }: {
   number: string;
   title: string;
+  badge?: string;
   leftLabel?: string;
   rightLabel?: string;
   left?: any;
   right?: any;
+  extra?: React.ReactNode;
   note?: string;
 }) {
   return (
@@ -55,23 +59,55 @@ function FactorCard({
       <div className="factorTitle">
         <span>{number}</span>
         <b>{title}</b>
+        {badge && <em className="factorSourceBadge">{badge}</em>}
       </div>
       {leftLabel || rightLabel ? (
         <div className="factorValues">
           <div>
             <small>{leftLabel || 'Équipe A'}</small>
-            <p>{left || 'Données indisponibles'}</p>
+            <div className="factorValBody">{left || <p>Données indisponibles</p>}</div>
           </div>
           <div>
             <small>{rightLabel || 'Équipe B'}</small>
-            <p>{right || 'Données indisponibles'}</p>
+            <div className="factorValBody">{right || <p>Données indisponibles</p>}</div>
           </div>
         </div>
       ) : (
-        <p className="factorSingle">{left || 'Données indisponibles'}</p>
+        <div className="factorSingle">{left || 'Données indisponibles'}</div>
       )}
+      {extra}
       {note && <small className="factorNote">{note}</small>}
     </article>
+  );
+}
+
+function AbsenceChips({ players, fallbackText }: { players?: any[]; fallbackText?: string }) {
+  if (!Array.isArray(players)) {
+    return <p>{fallbackText || 'Données indisponibles'}</p>;
+  }
+  if (players.length === 0) {
+    return <p className="absenceNone">✓ Effectif au complet (aucune absence signalée)</p>;
+  }
+  return (
+    <div className="absenceList">
+      {players.slice(0, 6).map((p: any) => {
+        const tagClass =
+          p.type === 'suspension'
+            ? 'absTagSusp'
+            : p.type === 'doubtful'
+            ? 'absTagDoubt'
+            : 'absTagInj';
+        return (
+          <span key={p.id || p.name} className={`absenceChip ${p.isKeyPlayer ? 'absenceKey' : ''}`}>
+            <i className={`absDot ${tagClass}`} />
+            <b>{p.name}</b>
+            {p.position && <small>{p.position}</small>}
+            <em className={tagClass}>{p.labelFr}</em>
+          </span>
+        );
+      })}
+      {players.length > 6 && <small className="absenceMore">+{players.length - 6} autre(s) absent(s)</small>}
+    </div>
   );
 }
 
@@ -86,8 +122,31 @@ function formatRecent(label: string, freshness: any) {
 }
 
 function styleSummary(value: any) {
-  if (!value) return 'Statistiques de style indisponibles via la source publique.';
-  return `${value.possession}% possession · ${value.shotsOnTarget} tirs cadrés · ${value.shots} tirs · ${value.corners} corners · ${value.yellow} cartons`;
+  if (!value) return <p>Statistiques de style indisponibles via la source publique.</p>;
+  return (
+    <p>
+      {value.possession}% possession · {value.shotsOnTarget} tirs cadrés · {value.shots} tirs · {value.corners} corners · {value.yellow}{' '}
+      cartons
+    </p>
+  );
+}
+
+function formatAttackDefense(statsSide: any, xgSeasonSide: any) {
+  if (!statsSide && !xgSeasonSide) return <p>Données indisponibles</p>;
+  return (
+    <div className="statsRichBlock">
+      {statsSide && (
+        <p>
+          Attaque <b>{statsSide.attaque}</b> · concède <b>{statsSide.defense}</b> b/m
+        </p>
+      )}
+      {xgSeasonSide && (
+        <span className="xgMiniPill">
+          FotMob : <b>{xgSeasonSide.xgPerMatch}</b> xG/m · <b>{xgSeasonSide.xgaPerMatch}</b> xGA/m ({xgSeasonSide.xPoints} xPts)
+        </span>
+      )}
+    </div>
+  );
 }
 
 type MatchAnalysisPanelProps = {
@@ -188,9 +247,17 @@ export function MatchAnalysisPanel({
   const probabilities = analysis?.probabilities || {};
   const factors = analysis?.factors || {};
   const vigilance = analysis?.vigilance || {};
+  const fotmob = analysis?.fotmob || null;
+  const realMatchXg = analysis?.realMatchXg || factors.stats?.xgMatchReel || null;
+  const xgSaison = factors.stats?.xgSaison || null;
   const freshHome = factors.forme?.fraicheurHome?.count ?? 0;
   const freshAway = factors.forme?.fraicheurAway?.count ?? 0;
   const finished = fixture ? isFixtureFinished(fixture) : false;
+
+  const referee = factors.autres?.arbitre || fotmob?.referee || null;
+  const coaches = factors.autres?.entraineurs || fotmob?.coaches || null;
+  const homeAbsenceCount = Array.isArray(factors.blessures?.homePlayers) ? factors.blessures.homePlayers.length : null;
+  const awayAbsenceCount = Array.isArray(factors.blessures?.awayPlayers) ? factors.blessures.awayPlayers.length : null;
 
   return (
     <section className="analysisPanel" id="analyse">
@@ -206,7 +273,10 @@ export function MatchAnalysisPanel({
             <h2>Analyse de la rencontre</h2>
           </div>
         </div>
-        <span className="estimatePill">ESTIMATION · NON GARANTIE</span>
+        <div className="analysisTopBadges">
+          {fotmob && <span className="fotmobActivePill">ESPN + FOTMOB</span>}
+          <span className="estimatePill">ESTIMATION · NON GARANTIE</span>
+        </div>
       </div>
 
       {fixture ? (
@@ -222,6 +292,12 @@ export function MatchAnalysisPanel({
                   <span>{fixture.venue}</span>
                 </>
               )}
+              {referee?.name && (
+                <>
+                  <span>·</span>
+                  <span title="Arbitre désigné (FotMob)">⚖ {referee.name}</span>
+                </>
+              )}
               <span className={`matchStatusPill ${finished ? 'statusDone' : 'statusUpcoming'}`}>
                 {finished ? 'Terminé' : 'À venir'}
               </span>
@@ -230,7 +306,9 @@ export function MatchAnalysisPanel({
               <div>
                 <TeamBadge team={fixture.home} size={56} />
                 <b>{fixture.home?.name}</b>
-                <small>DOMICILE</small>
+                <small>
+                  DOMICILE{coaches?.home ? ` · ${coaches.home}` : ''}
+                </small>
               </div>
               {finished ? (
                 <div className="finalScoreBox">
@@ -245,15 +323,27 @@ export function MatchAnalysisPanel({
               <div>
                 <TeamBadge team={fixture.away} size={56} />
                 <b>{fixture.away?.name}</b>
-                <small>EXTÉRIEUR</small>
+                <small>
+                  EXTÉRIEUR{coaches?.away ? ` · ${coaches.away}` : ''}
+                </small>
               </div>
             </div>
             {analysis && (
-              <div className="xgSummary">
-                <span>xG ESTIMÉS</span>
-                <b>{analysis.expectedGoals?.home}</b>
-                <i>—</i>
-                <b>{analysis.expectedGoals?.away}</b>
+              <div className="xgHeroRow">
+                <div className="xgSummary">
+                  <span>xG MODÈLE (AVANT-MATCH)</span>
+                  <b>{analysis.expectedGoals?.home}</b>
+                  <i>—</i>
+                  <b>{analysis.expectedGoals?.away}</b>
+                </div>
+                {realMatchXg && typeof realMatchXg.homeXg === 'number' && (
+                  <div className="xgSummary xgRealSummary">
+                    <span>xG RÉELS DU MATCH (FOTMOB)</span>
+                    <b>{realMatchXg.homeXg}</b>
+                    <i>—</i>
+                    <b>{realMatchXg.awayXg}</b>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -266,6 +356,9 @@ export function MatchAnalysisPanel({
             ] as const).map(([id, label]) => (
               <button key={id} className={tab === id ? 'tabActive' : ''} onClick={() => setTab(id)}>
                 {label}
+                {id === 'facteurs' && (homeAbsenceCount || awayAbsenceCount) ? (
+                  <small className="tabCountTag">{(homeAbsenceCount || 0) + (awayAbsenceCount || 0)} abs.</small>
+                ) : null}
                 {id === 'vigilance' && <i />}
               </button>
             ))}
@@ -276,7 +369,7 @@ export function MatchAnalysisPanel({
               <i className="largeSpinner" />
               <div>
                 <b>Analyse en cours</b>
-                <span>Forme, calendrier, statistiques et disponibilité ESPN…</span>
+                <span>Croisement ESPN & FotMob (xG, blessés/suspendus, H2H, arbitre)…</span>
               </div>
             </div>
           )}
@@ -287,13 +380,14 @@ export function MatchAnalysisPanel({
             <>
               <div className="predictionIntro">
                 <div>
-                  <span className="sectionKicker">MODÈLE STATISTIQUE</span>
+                  <span className="sectionKicker">MODÈLE STATISTIQUE ENRICHI</span>
                   <h3>Estimations du match</h3>
                   <small>
-                    Forme récente : {freshHome}/5 & {freshAway}/5 matchs, sur 60 jours max.
+                    Forme récente ({freshHome}/5 & {freshAway}/5 matchs)
+                    {fotmob ? ' · xG, effectifs & H2H FotMob intégrés' : ' · sur 60 jours max'}
                   </small>
                 </div>
-                <span className="modelMark">Poisson</span>
+                <span className="modelMark">{fotmob ? 'Poisson + xG FotMob' : 'Poisson'}</span>
               </div>
               {(freshHome < 5 || freshAway < 5) && (
                 <div className="dataWarning">
@@ -301,6 +395,29 @@ export function MatchAnalysisPanel({
                   limitée.
                 </div>
               )}
+
+              {/* Aperçu rapide des absents majeurs directement sur la vue d'ensemble si FotMob signale des blessés/suspendus */}
+              {(homeAbsenceCount !== null || awayAbsenceCount !== null) && ((homeAbsenceCount || 0) > 0 || (awayAbsenceCount || 0) > 0) && (
+                <div className="squadQuickBanner">
+                  <div className="squadQuickHeader">
+                    <span>✚ EFFECTIFS & ABSENCES (FOTMOB)</span>
+                    <button type="button" onClick={() => setTab('facteurs')}>
+                      Voir les 8 facteurs →
+                    </button>
+                  </div>
+                  <div className="squadQuickCols">
+                    <div>
+                      <small>{fixture.home?.name}</small>
+                      <p>{factors.blessures?.home}</p>
+                    </div>
+                    <div>
+                      <small>{fixture.away?.name}</small>
+                      <p>{factors.blessures?.away}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="predictionGrid">
                 <article className="predictionCard">
                   <div className="cardHeading">
@@ -417,6 +534,17 @@ export function MatchAnalysisPanel({
                 </article>
               </div>
 
+              {Array.isArray(fotmob?.insights) && fotmob.insights.length > 0 && (
+                <div className="fotmobInsightsBox">
+                  <span className="sectionKicker">FAITS MARQUANTS · FOTMOB / OPTA</span>
+                  <ul>
+                    {fotmob.insights.slice(0, 4).map((line: string, i: number) => (
+                      <li key={i}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <div className={`vigilanceSummary ${vigilance.score >= 30 ? 'vigilanceWarn' : ''}`}>
                 <span className="vigilanceIcon">!</span>
                 <div>
@@ -430,8 +558,8 @@ export function MatchAnalysisPanel({
                 </button>
               </div>
               <p className="legalNote">
-                Les probabilités sont des estimations fondées sur des données publiques. Elles ne constituent ni conseil de pari ni
-                garantie de résultat.
+                Les probabilités sont des estimations fondées sur des flux publics (ESPN & FotMob). Elles ne constituent ni conseil de pari
+                ni garantie de résultat.
               </p>
             </>
           )}
@@ -441,16 +569,17 @@ export function MatchAnalysisPanel({
               <div className="subsectionHeading">
                 <span className="sectionKicker">MÉTHODE RAPIDE EN 5 MINUTES</span>
                 <h3>Les 8 facteurs pris en compte</h3>
-                <p>Chaque information indisponible via l’API publique est signalée au lieu d’être inventée.</p>
+                <p>Données croisées entre ESPN et le flux JSON public FotMob (blessés/suspendus, vrais xG, H2H multi-saisons, arbitre).</p>
               </div>
               <div className="factorGrid">
                 <FactorCard
                   number="01"
                   title="Forme récente · 5 matchs max"
+                  badge="ESPN"
                   leftLabel={fixture.home?.name}
                   rightLabel={fixture.away?.name}
-                  left={factors.forme?.home}
-                  right={factors.forme?.away}
+                  left={<p>{factors.forme?.home}</p>}
+                  right={<p>{factors.forme?.away}</p>}
                   note={`${factors.forme?.note || ''} ${formatRecent('Domicile', factors.forme?.fraicheurHome)} ${formatRecent(
                     'Extérieur',
                     factors.forme?.fraicheurAway
@@ -459,32 +588,70 @@ export function MatchAnalysisPanel({
                 <FactorCard
                   number="02"
                   title="Domicile / extérieur"
+                  badge="ESPN"
                   leftLabel="À domicile"
                   rightLabel="À l’extérieur"
-                  left={factors.domicileExterieur?.home}
-                  right={factors.domicileExterieur?.away}
+                  left={<p>{factors.domicileExterieur?.home}</p>}
+                  right={<p>{factors.domicileExterieur?.away}</p>}
                 />
-                <FactorCard number="03" title="Confrontations directes" left={factors.h2h?.resume} note={factors.h2h?.note} />
+                <FactorCard
+                  number="03"
+                  title="Confrontations directes"
+                  badge={factors.h2h?.source === 'FotMob' ? 'FotMob' : 'ESPN'}
+                  left={factors.h2h?.resume}
+                  extra={
+                    Array.isArray(factors.h2h?.detail) && factors.h2h.detail.length > 0 ? (
+                      <div className="h2hMiniList">
+                        {factors.h2h.detail.slice(0, 4).map((duel: any, idx: number) => (
+                          <span key={idx} className="h2hMiniChip">
+                            {duel.date ? <small>{duel.date.slice(0, 7)}</small> : null}
+                            <b>
+                              {duel.homeName} {duel.homeScore}–{duel.awayScore} {duel.awayName}
+                            </b>
+                          </span>
+                        ))}
+                      </div>
+                    ) : null
+                  }
+                  note={factors.h2h?.note}
+                />
                 <FactorCard
                   number="04"
                   title="Blessés / suspendus"
-                  leftLabel={fixture.home?.short}
-                  rightLabel={fixture.away?.short}
-                  left={factors.blessures?.home}
-                  right={factors.blessures?.away}
+                  badge={Array.isArray(factors.blessures?.homePlayers) ? 'FotMob' : 'ESPN'}
+                  leftLabel={fixture.home?.short || fixture.home?.name}
+                  rightLabel={fixture.away?.short || fixture.away?.name}
+                  left={<AbsenceChips players={factors.blessures?.homePlayers} fallbackText={factors.blessures?.home} />}
+                  right={<AbsenceChips players={factors.blessures?.awayPlayers} fallbackText={factors.blessures?.away} />}
                   note={factors.blessures?.note}
                 />
                 <FactorCard
                   number="05"
                   title="Enjeu & classement"
+                  badge="ESPN"
                   leftLabel={fixture.home?.short}
                   rightLabel={fixture.away?.short}
-                  left={factors.enjeu?.home}
-                  right={factors.enjeu?.away}
+                  left={
+                    <p>
+                      {factors.enjeu?.home}
+                      {factors.enjeu?.classementHome
+                        ? ` (${factors.enjeu.classementHome.rank}e · ${factors.enjeu.classementHome.points} pts)`
+                        : ''}
+                    </p>
+                  }
+                  right={
+                    <p>
+                      {factors.enjeu?.away}
+                      {factors.enjeu?.classementAway
+                        ? ` (${factors.enjeu.classementAway.rank}e · ${factors.enjeu.classementAway.points} pts)`
+                        : ''}
+                    </p>
+                  }
                 />
                 <FactorCard
                   number="06"
                   title="Style de jeu récent"
+                  badge="ESPN"
                   leftLabel={fixture.home?.short}
                   rightLabel={fixture.away?.short}
                   left={styleSummary(factors.style?.home)}
@@ -493,28 +660,34 @@ export function MatchAnalysisPanel({
                 />
                 <FactorCard
                   number="07"
-                  title="Statistiques attaque / défense"
+                  title="Attaque, défense & vrais xG"
+                  badge={xgSaison?.home || realMatchXg ? 'ESPN + FotMob' : 'ESPN'}
                   leftLabel={fixture.home?.short}
                   rightLabel={fixture.away?.short}
-                  left={
-                    factors.stats?.home
-                      ? `Attaque ${factors.stats.home.attaque} · défense concède ${factors.stats.home.defense} buts/match`
-                      : ''
-                  }
-                  right={
-                    factors.stats?.away
-                      ? `Attaque ${factors.stats.away.attaque} · défense concède ${factors.stats.away.defense} buts/match`
-                      : ''
-                  }
+                  left={formatAttackDefense(factors.stats?.home, xgSaison?.home)}
+                  right={formatAttackDefense(factors.stats?.away, xgSaison?.away)}
                   note={factors.stats?.note}
                 />
                 <FactorCard
                   number="08"
-                  title="Météo, repos & autres"
+                  title="Météo, repos, arbitre & bancs"
+                  badge={fotmob ? 'ESPN + FotMob' : 'ESPN'}
                   leftLabel={fixture.home?.short}
                   rightLabel={fixture.away?.short}
-                  left={`${factors.autres?.reposHome ?? '—'} jours de repos`}
-                  right={`${factors.autres?.reposAway ?? '—'} jours de repos`}
+                  left={
+                    <p>
+                      {factors.autres?.reposHome ?? '—'} j. de repos
+                      {coaches?.home ? ` · Coach : ${coaches.home}` : ''}
+                      {coaches?.formationHome ? ` (${coaches.formationHome})` : ''}
+                    </p>
+                  }
+                  right={
+                    <p>
+                      {factors.autres?.reposAway ?? '—'} j. de repos
+                      {coaches?.away ? ` · Coach : ${coaches.away}` : ''}
+                      {coaches?.formationAway ? ` (${coaches.formationAway})` : ''}
+                    </p>
+                  }
                   note={`${
                     factors.autres?.meteo ? `Météo : ${factors.autres.meteo.description || 'données disponibles'}. ` : 'Météo non disponible. '
                   }${factors.autres?.note || ''}`}
@@ -523,8 +696,8 @@ export function MatchAnalysisPanel({
               <div className="fiveMinuteNote">
                 <b>Lecture rapide</b>
                 <span>
-                  Comparer les facteurs disponibles, repérer les données manquantes et garder en tête que la sortie reste une estimation
-                  du modèle, pas une certitude.
+                  Les absences (blessés/suspendus) et les vrais xG/xGA FotMob ajustent directement les buts attendus (λ) du modèle de
+                  Poisson. Vérifiez toujours le onze officiel publié 1h avant le coup d’envoi.
                 </span>
               </div>
             </div>
@@ -556,8 +729,8 @@ export function MatchAnalysisPanel({
                 <div className="integrityNotice">
                   <b>À retenir</b>
                   <p>
-                    Un score élevé peut refléter une information manquante ou une faiblesse du modèle. Seules les autorités et les
-                    organismes d’intégrité peuvent enquêter.
+                    Un score élevé peut refléter un écart modèle/marché, des absences majeures détectées ou une incertitude statistique.
+                    Seules les autorités et organismes d’intégrité peuvent enquêter.
                   </p>
                 </div>
               </div>
@@ -569,7 +742,7 @@ export function MatchAnalysisPanel({
           <i className="largeSpinner" />
           <div>
             <b>Chargement de la rencontre…</b>
-            <span>Récupération des informations et de l’analyse ESPN…</span>
+            <span>Récupération des informations ESPN & FotMob…</span>
           </div>
         </div>
       ) : (
