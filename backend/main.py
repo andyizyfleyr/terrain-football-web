@@ -119,6 +119,8 @@ async def debug_espn(league: str = "eng.1", team: str = "306") -> JSONResponse:
     from espn import ESPN_BASE, _client
 
     report = {}
+    # Le client doit rester ouvert jusqu'a la sonde du calendrier d'equipe :
+    # ferme, il renvoie "client has been closed" et la forme parait vide.
     async with _client() as client:
         for label, url in (
             (
@@ -155,14 +157,22 @@ async def debug_espn(league: str = "eng.1", team: str = "306") -> JSONResponse:
     try:
         from espn import FETCH_LOG, fetch_team_schedule, parse_iso
 
-        history = await fetch_team_schedule(
-            client, league, team, parse_iso("2026-11-22T14:00Z")
-        )
+        async with _client() as probe_client:
+            history = await fetch_team_schedule(
+                probe_client, league, team, parse_iso("2026-11-22T14:00Z")
+            )
         report["team_history"] = {
             "count": len(history),
+            "completed": len([m for m in history if m.get("gf") is not None]),
             "last": history[-3:],
         }
-        # Journal capture apres l'appel : on voit les erreurs ESPN reelles
+    except Exception as exc:  # pragma: no cover - diagnostic
+        report["probe_error"] = f"{type(exc).__name__}: {exc}"
+
+    # Journal capture apres l'appel : on voit les erreurs ESPN reelles
+    try:
+        from espn import FETCH_LOG
+
         report["fetch_log"] = FETCH_LOG[-12:]
     except Exception as exc:  # pragma: no cover - diagnostic
         report["probe_error"] = f"{type(exc).__name__}: {exc}"
