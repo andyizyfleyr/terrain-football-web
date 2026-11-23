@@ -90,7 +90,26 @@ check("analyse absente", payload.get("analysis") is None, str(payload.get("analy
 check("matchs bruts présents", len(payload.get("matches", [])) == 1, str(payload.get("matches")))
 check("aucun bloc analyst improvisé", "analyst" not in payload["matches"][0])
 
-print("3. Journée sans rencontre")
+print("3. Moteur joignable mais analyse non produite (repli)")
+async def stub_engine_partial(client, league, date_compact, matches):
+    # Le moteur répond, mais sans produire le bloc `analyst`.
+    return {
+        "league": league,
+        "date": date_compact,
+        "matches": [dict(BASE_MATCH)],
+        "sources": ["Données publiques"],
+    }
+
+
+api.call_analysis_service = stub_engine_partial
+with TestClient(api.app) as client:
+    response = client.get("/api/analyze?league=eng.1&date=20261122")
+    payload = response.json()
+check("statut 200", response.status_code == 200, str(response.status_code))
+check("analyse non déclarée complète", payload.get("analysis") is None, str(payload.get("analysis")))
+check("matchs bruts renvoyés", len(payload.get("matches", [])) == 1, str(payload.get("matches")))
+
+print("4. Journée sans rencontre")
 async def empty_build(league: str, date_compact: str, match_ids=None):
     return []
 
@@ -101,7 +120,7 @@ with TestClient(api.app) as client:
 check("statut 404", response.status_code == 404, str(response.status_code))
 check("message explicite", "Aucune rencontre" in response.json().get("error", ""), response.text[:120])
 
-print("4. Santé et contrat")
+print("5. Santé et contrat")
 api.build_base_matches = original_build
 api.call_analysis_service = original_call
 with TestClient(api.app) as client:

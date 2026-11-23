@@ -157,14 +157,28 @@ async def analyze(
 
         analysis = await call_analysis_service(client, league, date_compact, base_matches)
 
-    if analysis and isinstance(analysis.get("matches"), list) and analysis["matches"]:
+    # L'analyse n'est « complète » que si le moteur a réellement produit
+    # le bloc `analyst` (avec ses marchés dérivés). Sinon on renvoie les
+    # matchs bruts : le front saura alors calculer l'analyse de son côté,
+    # plutôt que de renvoyer une réponse amputée.
+    engine_matches = analysis.get("matches") if isinstance(analysis, dict) else None
+    complete = bool(
+        isinstance(engine_matches, list)
+        and engine_matches
+        and all(
+            isinstance(m, dict) and m.get("analyst") and m["analyst"].get("pronostics")
+            for m in engine_matches
+        )
+    )
+
+    if complete:
         return JSONResponse(
             {
                 "league": league,
                 "date": date_compact,
                 "season": _season_of(date_compact),
                 "analysis": "complete",
-                "matches": analysis["matches"],
+                "matches": engine_matches,
                 "sources": analysis.get("sources") or ["Données publiques"],
             }
         )
