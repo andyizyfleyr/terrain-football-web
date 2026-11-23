@@ -1,0 +1,15 @@
+[project]
+name = "terrain-football-api"
+version = "3.0.0"
+description = "API d'analyse football Terrain — ingestion ESPN et composition avec le moteur quantitatif v3."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi==0.115.6",
+  "httpx==0.28.1",
+]
+
+# Runtime FastAPI de Vercel : le point d'entrée du service Python est
+# `backend/main.py` (le dépôt héberge aussi l'application Next.js, dont
+# le dossier `app/` n'a rien à voir avec ce point d'entrée).
+[tool.vercel]
+entrypoint = "backend/main.py"

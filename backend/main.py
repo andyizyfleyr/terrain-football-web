@@ -28,6 +28,7 @@ Variables d'environnement :
 from __future__ import annotations
 
 import os
+import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -35,7 +36,11 @@ import httpx
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 
-from espn import build_base_matches, compact_date, parse_iso
+# Import du module frère quel que soit le répertoire de travail utilisé
+# par le runtime (uvicorn, `python backend/main.py`, tests).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from espn import build_base_matches, compact_date, parse_iso  # noqa: E402
 
 ENGINE_URL = (os.environ.get("ENGINE_URL") or "https://terrain-football-web.vercel.app").rstrip("/")
 ENGINE_TIMEOUT = float(os.environ.get("ENGINE_TIMEOUT", "120"))
