@@ -182,8 +182,39 @@ export async function GET(request: NextRequest) {
   const offset = Math.max(0, Number(searchParams.get('offset') || 0));
   const format = String(searchParams.get('format') || 'json');
   const since = searchParams.get('since') || '';
+  const probeMatchId = Number(searchParams.get('probeMatchId') || 0);
 
   try {
+    if (probeMatchId) {
+      const details = await getJson(`matchDetails?matchId=${probeMatchId}`, 15000);
+      const found: string[] = [];
+      const walk = (node: any, path: string, depth: number) => {
+        if (!node || depth > 8 || found.length > 60) return;
+        if (Array.isArray(node)) {
+          node.slice(0, 3).forEach((item, i) => walk(item, `${path}[${i}]`, depth + 1));
+          return;
+        }
+        if (typeof node !== 'object') return;
+        for (const key of Object.keys(node)) {
+          const value = node[key];
+          const next = path ? `${path}.${key}` : key;
+          if (/half|period/i.test(key)) {
+            found.push(`${next} = ${JSON.stringify(value).slice(0, 160)}`);
+          }
+          walk(value, next, depth + 1);
+        }
+      };
+      walk(details, '', 0);
+      return NextResponse.json({
+        probeMatchId,
+        headerStatusKeys: Object.keys(details?.header?.status || {}),
+        headerStatusUtctime: details?.header?.status?.utcTime ?? null,
+        teamsScore: details?.header?.teams?.map((t: any) => ({ name: t?.name, score: t?.score })) ?? null,
+        contentKeys: Object.keys(details?.content || {}),
+        found,
+      });
+    }
+
     const leaguePayload = await getJson(
       `leagues?id=${leagueId}&ccode3=USA_MA&season=${encodeURIComponent(season)}`,
       20000
@@ -326,6 +357,27 @@ export async function GET(request: NextRequest) {
     }
 
     const dates = matches.map(m => m.date).sort();
+
+    if (format === 'summary') {
+      const datesAll = rawMatches.map(m => m.utcTime.slice(0, 10)).sort();
+      return NextResponse.json({
+        league: 'eng.1',
+        leagueId,
+        season,
+        totalFinished: rawMatches.length,
+        firstDate: datesAll[0] ?? null,
+        lastDate: datesAll[datesAll.length - 1] ?? null,
+        counts: {
+          matches: matches.length,
+          teams: teams.length,
+          withOdds: matches.filter(m => m.odds).length,
+          withXg: matches.filter(m => m.homeXg !== null).length,
+          withHalfTime: matches.filter(m => m.htHome !== null).length,
+          withLineups: matches.filter(m => m.startersHome?.length).length,
+          withAbsences: matches.filter(m => m.unavailableHome?.length || m.unavailableAway?.length).length,
+        },
+      });
+    }
 
     if (format === 'packed') {
       return NextResponse.json({
