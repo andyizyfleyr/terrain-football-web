@@ -177,7 +177,7 @@ import espn as espn_module  # noqa: E402
 original_fetch = espn_module.fetch_json
 
 
-async def fake_fetch(client, url):
+async def fake_fetch(client, url, **kwargs):
     return standings_payload
 
 
@@ -267,14 +267,14 @@ check("match non terminé ignoré", espn_module._parse_event(not_completed) is N
 requested_urls = []
 
 
-async def fake_schedule_ok(client, url):
+async def fake_schedule_ok(client, url, **kwargs):
     requested_urls.append(url)
     if "/schedule" in url:
         return {"events": [TEAM_SCHEDULE_EVENT]}
     return {"events": [SEASON_SCOREBOARD_EVENT]}
 
 
-async def fake_schedule_ko(client, url):
+async def fake_schedule_ko(client, url, **kwargs):
     if "/schedule" in url:
         return None
     return {"events": [SEASON_SCOREBOARD_EVENT]}
@@ -283,11 +283,13 @@ async def fake_schedule_ko(client, url):
 async def run_schedule(fake):
     espn_module.fetch_json = fake
     espn_module.SEASON_CACHE.clear()
+    espn_module.SCHEDULE_CACHE.clear()
     try:
         return await espn_module.fetch_team_schedule(None, "eng.1", "306", KICKOFF)
     finally:
         espn_module.fetch_json = original_fetch
         espn_module.SEASON_CACHE.clear()
+        espn_module.SCHEDULE_CACHE.clear()
 
 
 history_direct = asyncio.run(run_schedule(fake_schedule_ok))
@@ -307,6 +309,48 @@ form_fallback = select_form(history_fallback, "306", KICKOFF)
 check("forme calculée depuis le repli", len(form_fallback) == 1, str(form_fallback))
 detail_fallback = _form_detail(form_fallback, "306")
 check("détail de forme cohérent", detail_fallback and detail_fallback[0]["gf"] == 1 and detail_fallback[0]["res"] == "D", str(detail_fallback))
+
+print("6. Limitation de débit ESPN (retry avec backoff)")
+
+
+class FakeResponse:
+    def __init__(self, status, payload):
+        self.status_code = status
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+class FakeClient:
+    def __init__(self, statuses):
+        self.statuses = list(statuses)
+        self.calls = 0
+
+    async def get(self, url, **kwargs):
+        self.calls += 1
+        status = self.statuses.pop(0) if self.statuses else 200
+        return FakeResponse(status, {"events": []})
+
+
+async def run_retry():
+    client = FakeClient([429, 429, 200])
+    result = await espn_module.fetch_json(client, "https://exemple.test/x", retries=2)
+    return result, client.calls
+
+
+result, calls = asyncio.run(run_retry())
+check("retry automatique après 429", result is not None and calls == 3, f"{result} / {calls} appels")
+
+
+async def run_retry_exhausted():
+    client = FakeClient([429, 429, 429, 429])
+    result = await espn_module.fetch_json(client, "https://exemple.test/y", retries=2)
+    return result, client.calls
+
+
+result, calls = asyncio.run(run_retry_exhausted())
+check("abandon après épuisement des tentatives", result is None and calls == 3, f"{result} / {calls} appels")
 
 print("")
 if failures:

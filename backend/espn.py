@@ -40,11 +40,31 @@ FORM_WINDOW_DAYS = 60
 FORM_MATCHES = 5
 STYLE_MATCHES = 3
 TIMEOUT = float(os.environ.get("ESPN_TIMEOUT", "12"))
+# Les calendriers d'equipe (saison complete) sont des reponses lourdes :
+# on leur laisse plus de temps et on limite le debit pour ne pas se faire
+# limiter par ESPN (429) quand plusieurs matchs sont analyses en meme temps.
+SLOW_TIMEOUT = float(os.environ.get("ESPN_SLOW_TIMEOUT", "30"))
+MAX_CONCURRENT = int(os.environ.get("ESPN_MAX_CONCURRENT", "4"))
+CACHE_TTL = float(os.environ.get("ESPN_CACHE_TTL", "600"))
+
+# Un semaphore par boucle d'evenements (une instance Vercel peut en
+# reutiliser plusieurs dans sa vie).
+_SEMAPHORES: Dict[Any, asyncio.Semaphore] = {}
+SCHEDULE_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
-def _client() -> httpx.AsyncClient:
+def _semaphore() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    semaphore = _SEMAPHORES.get(loop)
+    if semaphore is None:
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+        _SEMAPHORES[loop] = semaphore
+    return semaphore
+
+
+def _client(timeout: Optional[float] = None) -> httpx.AsyncClient:
     return httpx.AsyncClient(
-        timeout=TIMEOUT,
+        timeout=timeout or TIMEOUT,
         follow_redirects=True,
         headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
     )
@@ -59,17 +79,41 @@ def _log_fetch(url: str, status: Optional[int], error: Optional[str] = None) -> 
     del FETCH_LOG[:-40]
 
 
-async def fetch_json(client: httpx.AsyncClient, url: str) -> Optional[Any]:
-    """GET JSON tolérant : toute erreur réseau renvoie None (et est tracée)."""
-    try:
-        response = await client.get(url)
-        if response.status_code != 200:
+async def fetch_json(
+    client: httpx.AsyncClient,
+    url: str,
+    retries: int = 2,
+    timeout: Optional[float] = None,
+) -> Optional[Any]:
+    """GET JSON tolerant : retry avec backoff sur 429/5xx/timeout.
+
+    ESPN limite le debit sur les calendriers d'equipe : une requete qui
+    echoue est rejouee apres une courte pause au lieu de renvoyer une
+    donnee vide.
+    """
+    delay = 0.6
+    for attempt in range(retries + 1):
+        try:
+            async with _semaphore():
+                response = await client.get(url, timeout=timeout)
+            if response.status_code == 200:
+                return response.json()
+            if response.status_code in (429, 500, 502, 503, 504) and attempt < retries:
+                _log_fetch(url, response.status_code, f"nouvelle tentative {attempt + 1}")
+                await asyncio.sleep(delay)
+                delay *= 2
+                continue
             _log_fetch(url, response.status_code)
             return None
-        return response.json()
-    except Exception as exc:
-        _log_fetch(url, None, f"{type(exc).__name__}: {exc}")
-        return None
+        except Exception as exc:
+            if attempt < retries:
+                _log_fetch(url, None, f"{type(exc).__name__}: {exc} — nouvelle tentative {attempt + 1}")
+                await asyncio.sleep(delay)
+                delay *= 2
+                continue
+            _log_fetch(url, None, f"{type(exc).__name__}: {exc}")
+            return None
+    return None
 
 
 # --------------------------------------------------------------------------
@@ -285,7 +329,15 @@ async def fetch_team_schedule(
             f"{ESPN_BASE}/site/v2/sports/soccer/{league}/teams/{team_id}"
             f"/schedule?season={year}"
         )
-        payload = await fetch_json(client, url)
+        cache_key = f"{league}:{team_id}:{year}"
+        cached = SCHEDULE_CACHE.get(cache_key)
+        payload = None
+        if cached and (time.time() - cached["at"]) < CACHE_TTL:
+            payload = cached["payload"]
+        else:
+            payload = await fetch_json(client, url, timeout=SLOW_TIMEOUT)
+            if payload is not None:
+                SCHEDULE_CACHE[cache_key] = {"at": time.time(), "payload": payload}
         for event in (payload or {}).get("events") or []:
             parsed = _parse_event(event)
             if parsed and parsed["id"] not in seen:
@@ -623,6 +675,7 @@ async def build_base_match(
     league: str,
     match: Dict[str, Any],
     standings: Dict[str, Dict[str, Any]],
+    include_style: bool = True,
 ) -> Dict[str, Any]:
     """Match brut enrichi des facteurs ESPN, au format attendu par le front."""
     kickoff = parse_iso(match.get("date"))
@@ -638,8 +691,14 @@ async def build_base_match(
     home_overall = _overall_summary(home_form, home_id)
     away_overall = _overall_summary(away_form, away_id)
 
-    home_style = await fetch_style_averages(client, league, home_form, home_id)
-    away_style = await fetch_style_averages(client, league, away_form, away_id)
+    if include_style:
+        home_style = await fetch_style_averages(client, league, home_form, home_id)
+        away_style = await fetch_style_averages(client, league, away_form, away_id)
+    else:
+        # Balayage de la journee : le resume de style coute 6 requetes ESPN
+        # par match (3 par equipe) — reserve a la fiche du match.
+        home_style = None
+        away_style = None
 
     teams_count = len(standings) or 20
     home_standing = standings.get(home_id)
@@ -751,7 +810,11 @@ async def build_base_matches(
         if not day:
             return []
         standings = await fetch_standings(client, league)
+        # Fiche d'un match : contexte complet (style de jeu inclus).
+        # Balayage de la journee : contexte leger, pour ne pas saturer ESPN.
+        include_style = bool(match_ids)
         tasks = [
-            build_base_match(client, league, match, standings) for match in day
+            build_base_match(client, league, match, standings, include_style)
+            for match in day
         ]
         return list(await asyncio.gather(*tasks))
