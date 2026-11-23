@@ -13,13 +13,59 @@
 .teamBadge{flex:none;display:inline-grid;place-items:center;overflow:hidden;border:1px solid #e7ece8;border-radius:50%;background:#fff;color:var(--green);font:700 9px 'DM Sans',sans-serif}
 .teamBadge img{display:block;width:82%;height:82%;object-fit:contain}
 .monthMatchesPanel{border:1px solid #e1e8e2;border-radius:15px;background:#fff;box-shadow:var(--shadow);padding:20px 20px 14px;scroll-margin-top:90px}
-.monthMatchesHeader{align-items:center;flex-wrap:wrap;gap:14px;margin-bottom:16px}
+.monthMatchesHeader{align-items:center;flex-wrap:wrap;gap:14px;margin-bottom:14px}
 .monthMatchesActions{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
 .monthSearch{width:260px;margin:0}
 .monthScanButton{width:auto;margin:0;padding:0 14px;white-space:nowrap}
 .monthCardsGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px}
-.monthMatchCard{margin:0;padding:13px 13px 11px;text-decoration:none;color:inherit;display:flex;flex-direction:column;justify-content:space-between}
+.monthMatchCard{margin:0;padding:13px 13px 11px;text-decoration:none;color:inherit;display:flex;flex-direction:column;justify-content:space-between;scroll-margin-top:110px}
+.monthMatchCard.matchResumed{border-color:var(--green);background:linear-gradient(155deg,#f1f9f4,#ffffff);box-shadow:inset 3px 0 var(--green),0 6px 18px #16784b14}
 .matchDatePill{padding:3px 7px;border-radius:6px;background:#edf6ef;color:#296c45;font:600 8px 'DM Mono',monospace;text-transform:capitalize;white-space:nowrap}
-.analysisSection{margin-top:18px}
-@media(max-width:760px){.monthMatchesPanel{padding:16px 13px 12px}.monthMatchesActions{width:100%}.monthSearch{flex:1;min-width:180px}.monthCardsGrid{grid-template-columns:1fr;gap:10px}.analysisSection{margin-top:13px}}
-@media(max-width:430px){.monthSearch{width:100%;flex-basis:100%}.monthScanButton{flex:1}}
+
+/* Onglets de statut (Tous / À venir / Terminés) */
+.statusTabsBar{display:flex;align-items:center;gap:8px;padding:0 0 14px;margin-bottom:14px;border-bottom:1px solid #edf1ed;overflow-x:auto}
+.statusTabButton{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 13px;border:1px solid #e6ece7;border-radius:999px;background:#f8faf8;color:#66756c;font:600 11px 'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;transition:all .15s}
+.statusTabButton:hover{border-color:#c4decc;color:var(--green);background:#f1f8f3}
+.statusTabButton b{padding:2px 6px;border-radius:999px;background:#e8eeea;color:#516459;font:600 9px 'DM Mono',monospace;transition:all .15s}
+.statusTabButton.statusTabActive{border-color:var(--green);background:var(--green);color:#fff;box-shadow:0 4px 12px #16804e26}
+.statusTabButton.statusTabActive b{background:#ffffff29;color:#fff}
+
+/* Badges d'état sur les cartes et dans l'analyse */
+.cardStateTag{padding:3px 6px;border-radius:6px;font:600 7.5px 'DM Mono',monospace;letter-spacing:.3px;white-space:nowrap}
+.cardStateTag.stateUpcoming{background:#eef4fb;color:#416b95}
+.cardStateTag.stateDone{background:#eef1ef;color:#5d6b62}
+.matchStatusPill{padding:2px 7px;border-radius:999px;font:600 8px 'DM Mono',monospace;letter-spacing:.5px;text-transform:uppercase}
+.matchStatusPill.statusUpcoming{background:#e7f0fa;color:#3b6793}
+.matchStatusPill.statusDone{background:#e4ece6;color:#3d5547}
+.finalScoreBox{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 14px;border:1px solid #dfeae2;border-radius:12px;background:#fff;box-shadow:0 4px 12px #153b240c}
+.finalScoreBox strong{color:var(--ink);font:700 20px 'DM Mono',monospace;letter-spacing:1px}
+.finalScoreBox strong i{color:#9aa69e;font-style:normal}
+.finalScoreBox small{color:#8c9890;font:600 7px 'DM Mono',monospace;letter-spacing:.9px}
+
+/* Page dédiée d'analyse (/match/[league]/[date]/[id]) */
+.matchPageShell{min-height:100vh;display:flex;flex-direction:column}
+.matchPageBody{flex:1;max-width:1040px;width:100%;margin:24px auto 8px}
+.analysisToplineLeft{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.backLinkButton{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border:1px solid #dce8df;border-radius:8px;background:#f3f9f5;color:#256b43;font:600 11px 'DM Sans',sans-serif;cursor:pointer;transition:all .15s}
+.backLinkButton:hover{background:#e6f3ea;border-color:#b8d7c2;transform:translateX(-1px)}
+.navLinkButton{height:100%;display:flex;align-items:center;border:0;background:none;color:#627368;font:600 12px 'DM Sans',sans-serif;cursor:pointer;padding:0}
+.navLinkButton:hover{color:var(--green)}
+.navCurrent{height:100%;display:flex;align-items:center;position:relative;color:var(--green);font:600 12px 'DM Sans',sans-serif}
+.navCurrent:after{position:absolute;content:'';height:2px;bottom:0;left:0;right:0;background:var(--green);border-radius:3px 3px 0 0}
+
+/* Bottom Sheet Mobile */
+.bottomSheetBackdrop{position:fixed;inset:0;z-index:80;background:rgba(15,30,22,.48);backdrop-filter:blur(4px);display:flex;align-items:flex-end;justify-content:center;animation:sheetFadeIn .18s ease-out}
+.bottomSheetSheet{width:100%;max-width:760px;max-height:90dvh;display:flex;flex-direction:column;background:#fff;border-radius:20px 20px 0 0;box-shadow:0 -14px 40px rgba(12,32,20,.26);overflow:hidden;animation:sheetSlideUp .24s cubic-bezier(.22,1,.36,1)}
+.bottomSheetHeader{flex:none;padding:6px 14px 8px;border-bottom:1px solid #e9efea;background:#fbfdfb}
+.bottomSheetGrabberBtn{width:100%;display:grid;place-items:center;padding:4px 0 6px;border:0;background:none;cursor:pointer}
+.bottomSheetGrabber{width:42px;height:4px;border-radius:999px;background:#cfd9d2}
+.bottomSheetTopRow{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.openFullPageLink{color:#3c7552;text-decoration:none;font:600 10px 'DM Mono',monospace;padding:5px 9px;border:1px solid #daece0;border-radius:7px;background:#eef6f0;cursor:pointer}
+.bottomSheetCloseBtn{padding:5px 10px;border:1px solid #e3ebe5;border-radius:8px;background:#fff;color:#4f6156;font:600 11px 'DM Sans',sans-serif;cursor:pointer}
+.bottomSheetContent{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding-bottom:env(safe-area-inset-bottom,16px)}
+.bottomSheetContent .analysisPanel{border:0;border-radius:0;box-shadow:none;min-height:unset}
+@keyframes sheetFadeIn{from{opacity:0}to{opacity:1}}
+@keyframes sheetSlideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+
+@media(max-width:760px){.monthMatchesPanel{padding:16px 13px 12px}.monthMatchesActions{width:100%}.monthSearch{flex:1;min-width:180px}.monthCardsGrid{grid-template-columns:1fr;gap:10px}.matchPageBody{margin:14px auto 6px}.statusTabsBar{gap:6px;padding-bottom:11px;margin-bottom:12px}.statusTabButton{height:32px;padding:0 11px;font-size:10.5px}}
+@media(max-width:430px){.monthSearch{width:100%;flex-basis:100%}.monthScanButton{flex:1}.finalScoreBox strong{font-size:17px}}
