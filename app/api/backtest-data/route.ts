@@ -84,16 +84,51 @@ function collectMatches(payload: any): any[] {
   return out;
 }
 
+/**
+ * Score à la mi-temps : FotMob ne publie pas de score par période dans
+ * `header.status.halfs` (horodatages uniquement). On recompte donc les
+ * buts par période dans `header.events.*TeamGoals[*].shotmapEvent.period`.
+ */
 function readHalfTime(details: any): { htHome: number; htAway: number } | null {
-  const halfs = details?.header?.status?.halfs;
-  if (!halfs || typeof halfs !== 'object') return null;
-  const first = halfs['1'] ?? halfs[1];
-  const second = halfs['2'] ?? halfs[2];
-  if (!first || !second) return null;
-  const htHome = Number(first.score ?? first.goals);
-  const htAway = Number(second.score ?? second.goals);
-  if (!Number.isFinite(htHome) || !Number.isFinite(htAway)) return null;
+  const events = details?.header?.events;
+  if (!events || typeof events !== 'object') return null;
+  if (!('homeTeamGoals' in events) && !('awayTeamGoals' in events)) return null;
+
+  let htHome = 0;
+  let htAway = 0;
+  const count = (node: any, side: 'home' | 'away') => {
+    if (!node || typeof node !== 'object') return;
+    for (const key of Object.keys(node)) {
+      const list = Array.isArray(node[key]) ? node[key] : [];
+      for (const event of list) {
+        const period = event?.shotmapEvent?.period || event?.period;
+        if (period !== 'FirstHalf') continue;
+        if (side === 'home') htHome += 1;
+        else htAway += 1;
+      }
+    }
+  };
+  count(events.homeTeamGoals, 'home');
+  count(events.awayTeamGoals, 'away');
   return { htHome, htAway };
+}
+
+/** xG de la première période (statistiques par période de FotMob). */
+function readHalfTimeXg(details: any): { htXgHome: number | null; htXgAway: number | null } {
+  const out = { htXgHome: null as number | null, htXgAway: null as number | null };
+  const groups = details?.content?.stats?.Periods?.FirstHalf?.stats;
+  if (!Array.isArray(groups)) return out;
+  for (const grp of groups) {
+    for (const row of grp?.stats || []) {
+      if (row?.key !== 'expected_goals' || !Array.isArray(row.stats) || row.stats.length < 2) continue;
+      const home = Number(row.rawStats?.[0]?.value ?? row.stats[0]);
+      const away = Number(row.rawStats?.[1]?.value ?? row.stats[1]);
+      if (!Number.isFinite(home) || !Number.isFinite(away)) continue;
+      out.htXgHome = Number(home.toFixed(2));
+      out.htXgAway = Number(away.toFixed(2));
+    }
+  }
+  return out;
 }
 
 function readXg(details: any): { homeXg: number | null; awayXg: number | null; homeXgot: number | null; awayXgot: number | null } {
@@ -257,6 +292,7 @@ export async function GET(request: NextRequest) {
 
       const xg = readXg(details);
       const halfTime = readHalfTime(details);
+      const halfTimeXg = readHalfTimeXg(details);
       const referee = readReferee(details);
       const weather = details?.content?.weather || null;
       const stadium = details?.content?.matchFacts?.infoBox?.Stadium || null;
@@ -299,6 +335,8 @@ export async function GET(request: NextRequest) {
         awayXg: xg.awayXg,
         htHome: halfTime?.htHome ?? null,
         htAway: halfTime?.htAway ?? null,
+        htXgHome: halfTimeXg.htXgHome,
+        htXgAway: halfTimeXg.htXgAway,
         homeShots: homeShots.length || null,
         awayShots: awayShots.length || null,
         homeXgot: sum(homeShots, 'xgot'),
@@ -398,6 +436,7 @@ export async function GET(request: NextRequest) {
           'id', 'date', 'homeId', 'homeName', 'awayId', 'awayName',
           'homeGoals', 'awayGoals', 'homeXg', 'awayXg', 'htHome', 'htAway',
           'homeShots', 'awayShots', 'homeXgot', 'awayXgot',
+          'htXgHome', 'htXgAway',
           'odds', 'provider',
           'unavailableHome', 'unavailableAway', 'startersHome', 'startersAway',
           'referee', 'weather', 'pitch',
@@ -406,6 +445,7 @@ export async function GET(request: NextRequest) {
           m.id, m.date, m.homeId, m.homeName, m.awayId, m.awayName,
           m.homeGoals, m.awayGoals, m.homeXg, m.awayXg, m.htHome, m.htAway,
           m.homeShots, m.awayShots, m.homeXgot, m.awayXgot,
+          m.htXgHome, m.htXgAway,
           m.odds ? [m.odds.home, m.odds.draw, m.odds.away] : null, m.provider,
           m.unavailableHome, m.unavailableAway, m.startersHome, m.startersAway,
           m.referee, m.weather, m.pitch,

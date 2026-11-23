@@ -75,6 +75,9 @@ export type BacktestMatch = {
   awayXg: number | null;
   htHome: number | null;
   htAway: number | null;
+  /** xG de la première période (souvent indisponible). */
+  htXgHome?: number | null;
+  htXgAway?: number | null;
   homeShots: number | null;
   awayShots: number | null;
   homeXgot: number | null;
@@ -381,10 +384,32 @@ export function buildWalkForwardInputs(
       return stats;
     };
 
+    // Échantillons disponibles AVANT le coup d'envoi uniquement.
+    const priorWithHalfTime = history
+      .filter(
+        m =>
+          (m.homeId === match.homeId || m.awayId === match.homeId || m.homeId === match.awayId || m.awayId === match.awayId) &&
+          m.htHome !== null &&
+          m.htAway !== null
+      )
+      .slice(-24)
+      .map(m => ({
+        htHome: m.htHome as number,
+        htAway: m.htAway as number,
+        homeGoals: m.homeGoals,
+        awayGoals: m.awayGoals,
+      }));
+
+    const priorForCovariance = history
+      .slice(-60)
+      .map(m => ({ homeGoals: m.homeGoals, awayGoals: m.awayGoals }));
+
     const input: AnalystInput = {
       matchId: match.id,
       kickoffIso: `${match.date}T15:00:00.000Z`,
       baseLambdas,
+      covarianceSamples: priorForCovariance,
+      halfTimeSamples: priorWithHalfTime,
       market: match.odds
         ? { ...match.odds, format: 'decimal', source: 'Backtest', providerLabel: match.provider }
         : null,
