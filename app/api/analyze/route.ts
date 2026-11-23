@@ -6,6 +6,43 @@ export const dynamic = 'force-dynamic';
 
 const BACKEND_ORIGIN = process.env.BACKEND_API_URL || 'https://terrain-football-api.vercel.app';
 
+function sanitizeUpstreamText(text: any): any {
+  if (typeof text !== 'string') return text;
+  return text
+    .replace(/\s*\(?\b(?:ESPN|FotMob|Opta)\b\)?/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function sanitizeMatchStrings(match: any): any {
+  if (!match || typeof match !== 'object') return match;
+  const next = { ...match };
+  if (next.vigilance && Array.isArray(next.vigilance.reasons)) {
+    next.vigilance = {
+      ...next.vigilance,
+      reasons: next.vigilance.reasons.map(sanitizeUpstreamText),
+    };
+  }
+  if (Array.isArray(next.limitations)) {
+    next.limitations = next.limitations.map(sanitizeUpstreamText);
+  }
+  if (next.factors && typeof next.factors === 'object') {
+    const f = { ...next.factors };
+    for (const key of Object.keys(f)) {
+      if (f[key] && typeof f[key] === 'object') {
+        const card = { ...f[key] };
+        if (typeof card.note === 'string') card.note = sanitizeUpstreamText(card.note);
+        if (typeof card.resume === 'string') card.resume = sanitizeUpstreamText(card.resume);
+        if (typeof card.home === 'string') card.home = sanitizeUpstreamText(card.home);
+        if (typeof card.away === 'string') card.away = sanitizeUpstreamText(card.away);
+        f[key] = card;
+      }
+    }
+    next.factors = f;
+  }
+  return next;
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const league = searchParams.get('league') || 'eng.1';
@@ -50,14 +87,15 @@ export async function GET(request: NextRequest) {
     const enrichedMatches = await Promise.all(
       rawMatches.map(async m => {
         try {
-          return await enrichEspnMatchWithFotmob({
+          const enriched = await enrichEspnMatchWithFotmob({
             espnMatch: m,
             leagueSlug: league,
             compactDate: date || String(m?.date || '').slice(0, 10).replaceAll('-', ''),
             deepTeamFetch: isSingleMatch,
           });
+          return sanitizeMatchStrings(enriched);
         } catch {
-          return m;
+          return sanitizeMatchStrings(m);
         }
       })
     );

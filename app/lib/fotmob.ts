@@ -599,7 +599,7 @@ function computeAbsencePenalty(players: UnavailablePlayerInfo[], totalSquadValue
 
 function formatAbsenceSummaryFr(players: UnavailablePlayerInfo[]): string {
   if (!players.length) {
-    return 'Aucun blessé ni suspendu signalé (FotMob)';
+    return 'Aucun blessé ni suspendu signalé';
   }
   const confirmed = players.filter(p => p.type !== 'doubtful');
   const doubtful = players.filter(p => p.type === 'doubtful');
@@ -825,7 +825,7 @@ function extractH2H(h2hRoot: any, homeTeamId: number, awayTeamId: number, homeTe
     homeGoalsAvg: Number((totalGoalsHome / n).toFixed(2)),
     awayGoalsAvg: Number((totalGoalsAway / n).toFixed(2)),
     resume: `${n} confrontations : ${homeWins}V ${homeTeamName} · ${draws}N · ${awayWins}V ${awayTeamName} (${avgGoals} buts/m)`,
-    note: `Derniers duels (FotMob multi-saisons) : ${last3}.`,
+    note: `Derniers duels : ${last3}.`,
     detail: completed.slice(0, 8),
   };
 }
@@ -982,7 +982,7 @@ export async function enrichEspnMatchWithFotmob(params: {
     if (diff1x2 >= 0.14) {
       vigilanceScore += 25;
       reasons.push(
-        `Divergence modèle/marché (${Math.round(diff1x2 * 100)}%) après prise en compte des xG et absences FotMob.`
+        `Divergence modèle/marché (${Math.round(diff1x2 * 100)}%) après prise en compte des xG et des absences.`
       );
     }
     if (typeof market.over25 === 'number') {
@@ -1007,7 +1007,7 @@ export async function enrichEspnMatchWithFotmob(params: {
         ? espnMatch.home.name
         : espnMatch.away.name;
     reasons.push(
-      `Absences notables détectées sur FotMob (${impacted}) : impact significatif sur les onze probables.`
+      `Absences notables détectées (${impacted}) : impact significatif sur les onze probables.`
     );
   }
 
@@ -1071,8 +1071,8 @@ export async function enrichEspnMatchWithFotmob(params: {
         away: awayPenalty,
       },
       note: impactParts.length
-        ? `Source FotMob · Pondération xG appliquée : ${impactParts.join(' · ')}.`
-        : 'Source FotMob · Effectifs quasi complets, aucun malus majeur appliqué au modèle.',
+        ? `Pondération xG appliquée : ${impactParts.join(' · ')}.`
+        : 'Effectifs quasi complets, aucun malus majeur appliqué au modèle.',
     };
   }
 
@@ -1088,9 +1088,9 @@ export async function enrichEspnMatchWithFotmob(params: {
       xgMatchReel: liveOrFinalMatchXg,
       note:
         homeXgSeason && awayXgSeason
-          ? `Modèle calibré avec les vrais xG/xGA FotMob (${espnMatch.home.short || 'Dom.'} : ${homeXgSeason.xgPerMatch} xG/m, ${homeXgSeason.xgaPerMatch} xGA/m · ${espnMatch.away.short || 'Ext.'} : ${awayXgSeason.xgPerMatch} xG/m, ${awayXgSeason.xgaPerMatch} xGA/m) combinés à la forme récente ESPN.`
+          ? `Modèle calibré avec les xG/xGA de la saison (${espnMatch.home.short || 'Dom.'} : ${homeXgSeason.xgPerMatch} xG/m, ${homeXgSeason.xgaPerMatch} xGA/m · ${espnMatch.away.short || 'Ext.'} : ${awayXgSeason.xgPerMatch} xG/m, ${awayXgSeason.xgaPerMatch} xGA/m) combinés à la forme récente.`
           : liveOrFinalMatchXg
-          ? `xG réels du match mesurés par FotMob : ${liveOrFinalMatchXg.homeXg} – ${liveOrFinalMatchXg.awayXg}.`
+          ? `xG réels du match : ${liveOrFinalMatchXg.homeXg} – ${liveOrFinalMatchXg.awayXg}.`
           : prevStats.note,
     };
   }
@@ -1107,7 +1107,7 @@ export async function enrichEspnMatchWithFotmob(params: {
     }
     extraNotes.push(`Arbitre : ${referee.name}${refStatsParts.length ? ` (${refStatsParts.join(', ')})` : ''}.`);
   } else {
-    extraNotes.push('Arbitre : non encore désigné sur FotMob.');
+    extraNotes.push('Arbitre : non encore désigné.');
   }
 
   if (homeCoach || awayCoach) {
@@ -1153,11 +1153,11 @@ export async function enrichEspnMatchWithFotmob(params: {
 
   // Limitations mises à jour honnêtement
   const updatedLimitations = [
-    'Probabilités estimées par un modèle statistique hybride (Poisson + xG/absences FotMob + forme ESPN) : jamais garanties.',
+    'Probabilités estimées par un modèle statistique hybride (Poisson + xG/absences + forme récente) : jamais garanties.',
     'Le score de vigilance signale une divergence ou un aléa d’effectif, jamais une preuve de manipulation.',
     homeXgSeason && awayXgSeason
-      ? 'xG/xGA de saison, blessés/suspendus, H2H multi-saisons et arbitre enrichis via le flux JSON public non-officiel FotMob.'
-      : 'Blessés/suspendus, H2H multi-saisons et arbitre enrichis via le flux public FotMob (couverture xG selon compétition).',
+      ? 'xG/xGA de saison, blessés/suspendus, confrontations multi-saisons et arbitre intégrés au modèle.'
+      : 'Blessés/suspendus, confrontations multi-saisons et arbitre intégrés au modèle (couverture xG selon compétition).',
   ];
 
   return {
