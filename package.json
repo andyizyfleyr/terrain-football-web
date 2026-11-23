@@ -10,7 +10,9 @@
     "check:market": "node --experimental-strip-types --import ./scripts/register-ts-hook.mjs scripts/market-odds-check.ts",
     "check:market:integration": "node --experimental-strip-types --import ./scripts/register-ts-hook.mjs scripts/market-integration-check.ts",
     "check:market:fetch": "node --experimental-strip-types --import ./scripts/register-ts-hook.mjs scripts/market-fetch-check.ts",
-    "check": "npm run check:devig && npm run check:market && npm run check:market:integration && npm run check:market:fetch"
+    "check:model": "node --experimental-strip-types --import ./scripts/register-ts-hook.mjs scripts/model-check.ts",
+    "check:backtest": "node --experimental-strip-types --import ./scripts/register-ts-hook.mjs scripts/backtest-check.ts",
+    "check": "npm run check:devig && npm run check:market && npm run check:market:integration && npm run check:market:fetch && npm run check:model && npm run check:backtest"
   },
   "dependencies": {
     "next": "16.4.6",

@@ -1,20 +1,56 @@
 /**
- * MOTEUR D'ANALYSE QUANTITATIVE v2 — 8 modules
+ * MOTEUR D'ANALYSE QUANTITATIVE v3 — 8 modules
  * ---------------------------------------------------------------------------
- * 01. Modèle bivarié de Dixon-Coles (ρ) + décroissance exponentielle de la forme
+ * 01. Score bivarié (covariance λ₃) + Dixon-Coles (ρ) + décroissance exponentielle
  * 02. Force du calendrier (xG ajusté adversaires) + splits domicile/extérieur
- * 03. xG hors penalties, coups de pied arrêtés, finition & gardiens (Goals Prevented)
- * 04. Absences intelligentes (titulaires vs longue absence) + onze officiel H-1
+ * 03. Qualité de tir (xG / xGOT), finition, npxG, coups de pied arrêtés, gardiens
+ * 04. Absences mesurées sur les contributions individuelles + onze confirmé/predit
  * 05. Confrontation tactique (pressing, bloc bas, transitions, jeu direct)
- * 06. Calibrage bayésien avec le marché (retrait de marge / devigging + edge)
- * 07. Congestion 14 jours, calendrier européen, enjeux, arbitre & météo
+ * 06. Calibrage bayésien avec le marché (poids, température, seuil de valeur)
+ * 07. Congestion 14 j, enjeux, arbitre, météo, surface de jeu, séries
  * 08. Simulation Monte-Carlo minute par minute (10 000 itérations)
+ *
+ * Les paramètres de calibration (poids du marché, température, seuil de
+ * valeur, confiance) ne sont plus posés à la main : ils sont ajustés sur un
+ * backtest walk-forward et versionnés dans calibrationParams.ts.
  *
  * Module pur, sans dépendance externe : toutes les statistiques sont dérivées
  * des données publiques et restent des estimations (jamais des certitudes).
  */
 
 import { devigPower, devigShin, devigThreeWayDecimal, devigTwoWayDecimal } from './devig';
+import {
+  buildScoreMatrix,
+  estimateCovariance,
+  estimateFirstHalfShare,
+  summariseScoreMatrix,
+} from './poissonModels';
+import {
+  EMPTY_SHOT_PROFILE,
+  shotQualityFactor,
+  type ShotQualityProfile,
+} from './shotQuality';
+import {
+  absenceImpactFromContributions,
+  buildPlayerContributions,
+  type PlayerContribution,
+} from './playerImpact';
+import {
+  analyseSequences,
+  sequenceAttackAdjustment,
+  sequenceDefenceAdjustment,
+  type SequenceProfile,
+} from './sequences';
+import { buildRefereeProfile, type RefereeProfile } from './refereeProfile';
+import { buildPitchProfile, type PitchProfile } from './pitchProfile';
+import {
+  applyCalibration,
+  calibratedConfidence,
+  probabilityInterval,
+  valueAssessment,
+  type CalibrationParams,
+} from './calibration';
+import { DEFAULT_CALIBRATION } from './calibrationParams';
 
 export { devigPower, devigShin, devigThreeWayDecimal, devigTwoWayDecimal, normaliseProbs } from './devig';
 
@@ -129,6 +165,10 @@ export type AnalystSquadMember = {
   rating?: number | null;
   goals?: number;
   assists?: number;
+  /** Productions attendues du joueur (saison) : pilier de l'impact mesuré. */
+  xg?: number;
+  xa?: number;
+  minutes?: number;
   marketValue?: number;
   excludeFromRanking?: boolean;
   injured?: boolean;
@@ -160,6 +200,8 @@ export type AnalystLineupPlayer = {
 export type AnalystLineup = {
   formation?: string | null;
   starters?: AnalystLineupPlayer[];
+  /** true = composition officielle confirmée, false = composition prédite. */
+  confirmed?: boolean;
 };
 
 export type AnalystRecentMatch = {
@@ -171,6 +213,8 @@ export type AnalystRecentMatch = {
   homeScore: number;
   awayScore: number;
   competition?: string;
+  /** Identifiant du match chez la source publique (pour le shotmap). */
+  matchId?: number;
 };
 
 export type AnalystTeamInput = {
@@ -208,6 +252,21 @@ export type AnalystInput = {
   league: AnalystLeagueInput;
   home: AnalystTeamInput;
   away: AnalystTeamInput;
+  /** Surcharge de la calibration (utilisée par le backtest). */
+  calibration?: Partial<CalibrationParams>;
+  /** Qualité de tir historique des deux équipes (shotmap). */
+  shotQuality?: {
+    home: ShotQualityProfile | null;
+    away: ShotQualityProfile | null;
+    league: { xgPerShot: number; xgotPerShot: number };
+  } | null;
+  /** Séries observées (buts marqués, clean sheets…). */
+  sequences?: { home: SequenceProfile; away: SequenceProfile } | null;
+  /** Surface et stade. */
+  pitch?: PitchProfile | null;
+  /** Matchs passés servant à estimer la covariance et la répartition des buts. */
+  covarianceSamples?: { homeGoals: number; awayGoals: number }[];
+  halfTimeSamples?: { htHome: number; htAway: number; homeGoals: number; awayGoals: number }[];
 };
 
 /* ------------------------------------------------------------------ */
@@ -234,6 +293,33 @@ export type AnalystReport = {
     completeness: number;
     separation: number;
     agreement: number;
+    /** Probabilité MESURÉE que l'issue retenue par le modèle soit la bonne. */
+    probability: number;
+    /** Intervalle de crédibilité 80 % autour de cette probabilité. */
+    interval: { low: number; high: number };
+    note: string;
+  };
+  calibration: {
+    modelWeight: number;
+    marketWeight: number;
+    sharpness: number;
+    valueThreshold: number;
+    effectiveSampleSize: number;
+    source: string;
+    dataset: string;
+    fittedAt: string;
+    sampleSize: number;
+    league: string;
+    period: string;
+    modelLogLoss: number;
+    marketLogLoss: number | null;
+    calibratedLogLoss: number;
+    naiveLogLoss: number;
+    brier: number;
+    accuracy: number;
+    valueRoi: number | null;
+    valueBets: number;
+    limitations: string[];
   };
   lambdas: { home: number; away: number; total: number; startHome: number; startAway: number };
   model: {
@@ -253,6 +339,40 @@ export type AnalystReport = {
     prior: number;
     fitted: boolean;
     samples: number;
+    note: string;
+  };
+  covariance: {
+    value: number;
+    samples: number;
+    fitted: boolean;
+    note: string;
+  };
+  periodSplit: {
+    firstHalfShare: number;
+    samples: number;
+    fitted: boolean;
+    note: string;
+  };
+  shotQuality: {
+    home: ShotQualityProfile;
+    away: ShotQualityProfile;
+    factorHome: number;
+    factorAway: number;
+    note: string;
+  };
+  sequences: {
+    home: SequenceProfile;
+    away: SequenceProfile;
+    attackFactorHome: number;
+    attackFactorAway: number;
+    defenceFactorHome: number;
+    defenceFactorAway: number;
+    note: string;
+  };
+  uncertainty: {
+    home: { low: number; high: number };
+    draw: { low: number; high: number };
+    away: { low: number; high: number };
     note: string;
   };
   timeDecay: {
@@ -329,6 +449,7 @@ export type AnalystReport = {
     };
     officialLineup: {
       available: boolean;
+      confirmed: boolean;
       home?: { formation?: string | null; strength: number; rotation: number; note: string };
       away?: { formation?: string | null; strength: number; rotation: number; note: string };
       note: string;
@@ -386,8 +507,17 @@ export type AnalystReport = {
       note: string;
     };
     stakes: { home: string; away: string; homeFactor: number; awayFactor: number; note: string };
-    referee: { name: string; yellowPerMatch: number | null; penaltiesPerMatch: number | null; foulsPerMatch: number | null; effect: number; note: string };
+    referee: {
+      name: string;
+      yellowPerMatch: number | null;
+      penaltiesPerMatch: number | null;
+      foulsPerMatch: number | null;
+      effect: number;
+      note: string;
+      profile: RefereeProfile;
+    };
     weather: { temperature: number | null; wind: number | null; precipitation: number | null; effect: number; note: string };
+    pitch: PitchProfile;
   };
   simulation: {
     runs: number;
@@ -440,94 +570,6 @@ function goalsAgainst(row?: AnalystTableRow | null): number {
 const XI_DECAY = 0.0075; // ~92 jours de demi-vie
 const RHO_PRIOR = -0.05;
 
-function dixonColesTau(x: number, y: number, lh: number, la: number, rho: number): number {
-  if (x === 0 && y === 0) return 1 - lh * la * rho;
-  if (x === 0 && y === 1) return 1 + lh * rho;
-  if (x === 1 && y === 0) return 1 + la * rho;
-  if (x === 1 && y === 1) return 1 - rho;
-  return 1;
-}
-
-function buildScoreMatrix(lh: number, la: number, rho: number, maxGoals = 8): number[][] {
-  const matrix: number[][] = [];
-  let total = 0;
-  for (let h = 0; h <= maxGoals; h++) {
-    const row: number[] = [];
-    for (let a = 0; a <= maxGoals; a++) {
-      const base = poissonPmf(h, lh) * poissonPmf(a, la);
-      const tau = dixonColesTau(h, a, lh, la, rho);
-      const value = Math.max(0, base * tau);
-      row.push(value);
-      total += value;
-    }
-    matrix.push(row);
-  }
-  if (total > 0) {
-    for (let h = 0; h <= maxGoals; h++) {
-      for (let a = 0; a <= maxGoals; a++) matrix[h][a] /= total;
-    }
-  }
-  return matrix;
-}
-
-function matrixProbabilities(matrix: number[][], lh: number, la: number) {
-  let pHome = 0;
-  let pDraw = 0;
-  let pAway = 0;
-  let btts = 0;
-  let over15 = 0;
-  let over25 = 0;
-  let over35 = 0;
-  let firstHalfGoals = 0;
-  let secondHalfGoals = 0;
-  const scores: { h: number; a: number; p: number }[] = [];
-
-  for (let h = 0; h < matrix.length; h++) {
-    for (let a = 0; a < matrix.length; a++) {
-      const p = matrix[h][a];
-      if (h > a) pHome += p;
-      else if (h === a) pDraw += p;
-      else pAway += p;
-      if (h >= 1 && a >= 1) btts += p;
-      if (h + a >= 2) over15 += p;
-      if (h + a >= 3) over25 += p;
-      if (h + a >= 4) over35 += p;
-
-      // Répartition empirique : 44 % des buts en 1re période, 56 % en 2e
-      const pH1 = 0.44;
-      const pH2 = 0.56;
-      const gh1 = (h + a) * pH1;
-      firstHalfGoals += p * gh1;
-      const gh2 = (h + a) * pH2;
-      secondHalfGoals += p * gh2;
-
-      if (h <= 6 && a <= 6) scores.push({ h, a, p: round(p, 4) });
-    }
-  }
-
-  scores.sort((x, y) => y.p - x.p);
-
-  // Probabilité d'au moins un but par période (Poisson sur les λ partiels)
-  const lambdaTotal = lh + la;
-  const firstHalfOver05 = 1 - Math.exp(-lambdaTotal * 0.44);
-  const secondHalfOver05 = 1 - Math.exp(-lambdaTotal * 0.56);
-
-  return {
-    home: pHome,
-    draw: pDraw,
-    away: pAway,
-    btts,
-    over15,
-    over25,
-    over35,
-    firstHalfOver05,
-    secondHalfOver05,
-    firstHalfGoals,
-    secondHalfGoals,
-    scores,
-  };
-}
-
 /**
  * Estimation de ρ par moindres carrés sur la matrice de scores (1,0), (0,1),
  * (0,0), (1,1) — méthode Dixon & Coles (1997) appliquée aux matchs récents.
@@ -550,7 +592,7 @@ function estimateRho(matches: AnalystRecentMatch[], lh: number, la: number): { r
   let bestRho = RHO_PRIOR;
   let bestError = Number.POSITIVE_INFINITY;
   for (let rho = -0.25; rho <= 0.2501; rho += 0.005) {
-    const matrix = buildScoreMatrix(lh, la, rho, 4);
+    const matrix = buildScoreMatrix({ lambdaHome: lh, lambdaAway: la, covariance: 0, rho, maxGoals: 4 });
     let error = 0;
     for (const key of Object.keys(counts)) {
       const parts = key.split('-');
@@ -758,10 +800,31 @@ function goalkeeperProfile(team: AnalystTeamInput): AnalystReport['finishing']['
 
 type AbsenceAnalysis = AnalystReport['absences']['home'];
 
-function analyseAbsences(team: AnalystTeamInput): AbsenceAnalysis {
+function analyseAbsences(
+  team: AnalystTeamInput,
+  contributions?: PlayerContribution[]
+): AbsenceAnalysis {
   const squad = team.squad || [];
   const totalSquadValue = squad.reduce((acc, m) => acc + (m.marketValue || 0), 0);
   const teamGa = squad.reduce((acc, m) => acc + (m.goals || 0) + (m.assists || 0), 0);
+
+  // Contribution mesurée : part de la production d'équipe assurée par chaque
+  // joueur (xG, xA, buts, passes, minutes). Plus informative que la seule
+  // valeur marchande.
+  const measured = contributions?.length
+    ? absenceImpactFromContributions({
+        absences: (team.absences || []).map(a => ({
+          id: a.id,
+          name: a.name,
+          type: a.type,
+          position: a.position,
+          marketValue: a.marketValue,
+          rating: a.rating,
+        })),
+        contributions,
+      })
+    : null;
+  const measuredByName = new Map((measured?.items || []).map(i => [i.name, i]));
 
   const items: AbsenceAnalysis['items'] = [];
   let attackImpact = 0;
@@ -793,7 +856,13 @@ function analyseAbsences(team: AnalystTeamInput): AbsenceAnalysis {
     if (abs.type === 'doubtful') weight *= 0.45;
 
     const ratingBoost = rating && rating >= 7.1 ? 1.25 : rating && rating <= 6.5 ? 0.85 : 1;
-    const impact = clamp(weight * (0.55 * clamp(valueShare * 6, 0, 1) + 0.45 * clamp(gaShare * 3.2, 0, 1)) * ratingBoost, 0, 0.16);
+    const valueImpact = clamp(weight * (0.55 * clamp(valueShare * 6, 0, 1) + 0.45 * clamp(gaShare * 3.2, 0, 1)) * ratingBoost, 0, 0.16);
+
+    // Impact mesuré sur les contributions individuelles (prioritaire).
+    const measuredItem = measuredByName.get(abs.name);
+    const impact = measuredItem && measuredItem.source === 'contribution'
+      ? clamp(measuredItem.impact * weight, 0, 0.18)
+      : valueImpact;
 
     const isAttacker = /ST|CF|FW|LW|RW|CAM|AM|W/.test(position) || goals >= 2;
     const isDefender = /GK|CB|LB|RB|LWB|RWB|CM|DM/.test(position);
@@ -811,8 +880,10 @@ function analyseAbsences(team: AnalystTeamInput): AbsenceAnalysis {
     const role = fringe
       ? 'Remplaçant / longue absence (déjà intégré dans les xG de saison)'
       : longAbsence
-      ? 'Absence de longue durée (retour lointain, déjà intégrée)'
-      : 'Titulaire régulier';
+        ? 'Absence de longue durée (retour lointain, déjà intégrée)'
+        : measuredItem && measuredItem.source === 'contribution'
+          ? 'Contribution individuelle mesurée'
+          : 'Titulaire régulier';
 
     items.push({
       name: abs.name,
@@ -820,11 +891,18 @@ function analyseAbsences(team: AnalystTeamInput): AbsenceAnalysis {
       role,
       impact: round(impact, 3),
       longTerm: fringe || longAbsence,
-      note: `G+A ${goals + assists} · note ${rating ?? '—'} · poids ${round(impact * 100, 1)} %`,
+      note:
+        measuredItem && measuredItem.source === 'contribution'
+          ? `${measuredItem.note} · poids ${round(impact * 100, 1)} %`
+          : `G+A ${goals + assists} · note ${rating ?? '—'} · poids ${round(impact * 100, 1)} %`,
     });
   }
 
   items.sort((a, b) => b.impact - a.impact);
+
+  const coverageNote = measured
+    ? ` · ${measured.note}`
+    : '';
 
   return {
     items,
@@ -833,7 +911,7 @@ function analyseAbsences(team: AnalystTeamInput): AbsenceAnalysis {
     keyPlayers,
     longTerm,
     note: items.length
-      ? `${items.length} absence(s) signalée(s), dont ${longTerm} déjà intégrée(s) aux moyennes de saison (pas de double pénalisation).`
+      ? `${items.length} absence(s) signalée(s), dont ${longTerm} déjà intégrée(s) aux moyennes de saison (pas de double pénalisation).${coverageNote}`
       : 'Aucun absent signalé : effectif au complet.',
   };
 }
@@ -852,14 +930,16 @@ function lineupStrength(lineup: AnalystLineup | null | undefined, squad: Analyst
 
   const strength = starterRating.length ? mean(starterRating) : coreRating.length ? mean(coreRating) : 0;
   const rotation = coreValue > 0 && starterValue > 0 ? starterValue / coreValue : 1;
+  const confirmed = lineup.confirmed !== false;
+  const label = confirmed ? 'onze officiel' : 'onze prédit';
   return {
     formation: lineup.formation || null,
     strength: round(strength, 2),
     rotation: round(rotation, 3),
     note:
       starterRating.length
-        ? `Note moyenne du onze officiel ${round(strength, 2)} (11 titulaires), valeur ${round(rotation, 2)} × le noyau habitual.`
-        : `Onze officiel publié (11 titulaires), valeur ${round(rotation, 2)} × le noyau habituel.`,
+        ? `Note moyenne du ${label} ${round(strength, 2)} (11 titulaires), valeur ${round(rotation, 2)} × le noyau habituel${confirmed ? '' : ' (composition prédite, pondération réduite)'}.`
+        : `${confirmed ? 'Onze officiel publié' : 'Onze prédit'} (11 titulaires), valeur ${round(rotation, 2)} × le noyau habituel${confirmed ? '' : ' (pondération réduite)'}.`,
   };
 }
 
@@ -1527,9 +1607,54 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   lambdaHome *= 1 + bigChanceHome;
   lambdaAway *= 1 + bigChanceAway;
 
-  /* --- Module 04 : absences & onze officiel --------------------------- */
-  const absencesHome = analyseAbsences(home);
-  const absencesAway = analyseAbsences(away);
+  /* --- Module 03bis : qualité de tir (xG / xGOT par tir) ------------- */
+  // Le ratio buts/xG de saison mélange qualité des occasions et chance de
+  // finition. Le shotmap sépare les deux : on ajuste le λ selon la qualité
+  // réelle des tirs-created (danger moyen xGOT par tir).
+  const shotInput = input.shotQuality || null;
+  const shotHome = shotInput?.home || null;
+  const shotAway = shotInput?.away || null;
+  const leagueXgPerShot = shotInput?.league?.xgPerShot || 0;
+  const leagueXgotPerShot = shotInput?.league?.xgotPerShot || 0;
+  const shotFactorHome = shotQualityFactor(shotHome, leagueXgPerShot, leagueXgotPerShot);
+  const shotFactorAway = shotQualityFactor(shotAway, leagueXgPerShot, leagueXgotPerShot);
+  lambdaHome *= shotFactorHome.factor;
+  lambdaAway *= shotFactorAway.factor;
+
+  /* --- Module 04 : absences (contributions mesurées) & onze ---------- */
+  // L'impact d'un absent est calculé sur sa CONTRIBUTION réelle au jeu
+  // (xG, xA, buts, passes, minutes) et non sur sa seule valeur marchande.
+  const contributionsHome = buildPlayerContributions(
+    (home.squad || []).map(m => ({
+      id: m.id,
+      name: m.name,
+      position: m.position,
+      goals: m.goals,
+      assists: m.assists,
+      rating: m.rating,
+      marketValue: m.marketValue,
+      minutes: m.minutes,
+      xg: m.xg,
+      xa: m.xa,
+    }))
+  );
+  const contributionsAway = buildPlayerContributions(
+    (away.squad || []).map(m => ({
+      id: m.id,
+      name: m.name,
+      position: m.position,
+      goals: m.goals,
+      assists: m.assists,
+      rating: m.rating,
+      marketValue: m.marketValue,
+      minutes: m.minutes,
+      xg: m.xg,
+      xa: m.xa,
+    }))
+  );
+
+  const absencesHome = analyseAbsences(home, contributionsHome);
+  const absencesAway = analyseAbsences(away, contributionsAway);
   lambdaHome *= 1 - absencesHome.attackImpact;
   lambdaAway *= 1 - absencesAway.attackImpact;
   lambdaHome *= 1 + absencesAway.defenceImpact;
@@ -1537,12 +1662,16 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
 
   const lineupHome = lineupStrength(home.lineup, home.squad || []);
   const lineupAway = lineupStrength(away.lineup, away.squad || []);
+  // Un onze PRÉDIT (Enetpulse) est une information, pas une confirmation :
+  // son poids est divisé par deux.
+  const lineupHomeWeight = home.lineup?.confirmed === false ? 0.5 : 1;
+  const lineupAwayWeight = away.lineup?.confirmed === false ? 0.5 : 1;
   if (lineupHome && lineupHome.rotation !== 1) {
-    const adj = clamp(1 + (lineupHome.rotation - 1) * 0.35, 0.9, 1.1);
+    const adj = clamp(1 + (lineupHome.rotation - 1) * 0.35 * lineupHomeWeight, 0.92, 1.1);
     lambdaHome *= adj;
   }
   if (lineupAway && lineupAway.rotation !== 1) {
-    const adj = clamp(1 + (lineupAway.rotation - 1) * 0.35, 0.9, 1.1);
+    const adj = clamp(1 + (lineupAway.rotation - 1) * 0.35 * lineupAwayWeight, 0.92, 1.1);
     lambdaAway *= adj;
   }
 
@@ -1556,7 +1685,7 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   lambdaHome *= tempoRatio * (1 + matchup.homeAdj);
   lambdaAway *= tempoRatio * (1 + matchup.awayAdj);
 
-  /* --- Module 07 : calendrier, enjeux, arbitre, météo ------------------ */
+  /* --- Module 07 : calendrier, enjeux, séries, surface, arbitre, météo - */
   const calendarHome = analyseCalendar(home, kickoffIso, home.recentMatches || []);
   const calendarAway = analyseCalendar(away, kickoffIso, away.recentMatches || []);
   const fatigueHome = clamp(1 - calendarHome.fatigue * 0.16, 0.9, 1.06);
@@ -1573,26 +1702,40 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   const yellowPerMatch = typeof referee?.yellowPerMatch === 'number' ? referee.yellowPerMatch : null;
   const penaltiesPerMatch = typeof referee?.penaltiesPerMatch === 'number' ? referee.penaltiesPerMatch : null;
   const foulsPerMatch = typeof referee?.foulsPerMatch === 'number' ? referee.foulsPerMatch : null;
-  let refereeEffect = 1;
-  const refereeNotes: string[] = [];
-  if (yellowPerMatch !== null) {
-    if (yellowPerMatch >= 4.6) {
-      refereeEffect *= 0.98; // plus de coupures de jeu : moins de jeu fluide
-      refereeNotes.push(`arbitre sévère (${round(yellowPerMatch, 1)} cartons/match) : jeu fluide en baisse, volatilité disciplinaire accrue`);
-    } else {
-      refereeNotes.push(`arbitre mesuré (${round(yellowPerMatch, 1)} cartons/match)`);
-    }
-  }
-  if (penaltiesPerMatch !== null) {
-    // Les penalties représentent ~16 % des buts : on n'applique l'effet qu'à cette part
-    const penFactor = clamp(penaltiesPerMatch / 0.3, 0.7, 1.7);
-    refereeEffect *= 1 + (penFactor - 1) * 0.16;
-    refereeNotes.push(`${round(penaltiesPerMatch, 2)} penalty(s) par match (moyenne ≈ 0,30) : part penalty ajustée (×${round(penFactor, 2)})`);
-  }
-  if (foulsPerMatch !== null && foulsPerMatch >= 24) {
-    refereeEffect *= 1.01;
-    refereeNotes.push(`${round(foulsPerMatch, 1)} fautes par match : légèrement plus de coups de pied arrêtés`);
-  }
+
+  // Profil d'arbitre : mesuré RELATIVEMENT à la moyenne du championnat
+  // (FotMob fournit la moyenne de référence pour chaque statistic).
+  const refereeProfile = buildRefereeProfile({
+    name: referee?.name ? String(referee.name) : 'Non désigné',
+    matches: typeof referee?.matches === 'number' ? referee.matches : null,
+    yellowPerMatch,
+    yellowAverage: typeof referee?.yellowAverage === 'number' ? referee.yellowAverage : null,
+    yellowAverageType: referee?.yellowAverageType ?? null,
+    foulsPerMatch,
+    foulsAverage: typeof referee?.foulsAverage === 'number' ? referee.foulsAverage : null,
+    foulsAverageType: referee?.foulsAverageType ?? null,
+    penaltiesTotal: typeof referee?.penaltiesTotal === 'number' ? referee.penaltiesTotal : null,
+    penaltiesPerMatch,
+    redCardsTotal: typeof referee?.redCardsTotal === 'number' ? referee.redCardsTotal : null,
+  });
+  const refereeEffect = refereeProfile.effect;
+  const refereeNotes: string[] = [refereeProfile.note];
+
+  /* --- Module 07bis : séries (séries de buts, clean sheets) ----------- */
+  // Ajustement volontairement faible : le marché sur-réagit aux séries,
+  // le modèle ne doit pas lui emboîter le pas.
+  const sequenceHome = input.sequences?.home ?? analyseSequences(home.recentMatches || [], home.teamId, 'home');
+  const sequenceAway = input.sequences?.away ?? analyseSequences(away.recentMatches || [], away.teamId, 'away');
+  const seqAttackHome = sequenceAttackAdjustment(sequenceHome, homeGoalsPerMatch || 1.3);
+  const seqAttackAway = sequenceAttackAdjustment(sequenceAway, awayGoalsPerMatch || 1.2);
+  const seqDefenceHome = sequenceDefenceAdjustment(sequenceHome, homeGoalsPerMatch || 1.3);
+  const seqDefenceAway = sequenceDefenceAdjustment(sequenceAway, awayGoalsPerMatch || 1.2);
+  lambdaHome *= seqAttackHome.factor * seqDefenceHome.factor;
+  lambdaAway *= seqAttackAway.factor * seqDefenceAway.factor;
+
+  /* --- Module 07ter : surface de jeu ---------------------------------- */
+  const pitchProfile = input.pitch ?? buildPitchProfile(null);
+  const pitchEffect = pitchProfile.effect;
 
   const weather = input.weather || null;
   const temperature = typeof weather?.temperature === 'number' ? weather.temperature : null;
@@ -1620,8 +1763,8 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
     weatherNotes.push('pluie : précision en baisse, plus d’erreurs');
   }
 
-  lambdaHome = clamp(lambdaHome * refereeEffect * weatherEffect, 0.22, 3.9);
-  lambdaAway = clamp(lambdaAway * refereeEffect * weatherEffect, 0.2, 3.9);
+  lambdaHome = clamp(lambdaHome * refereeEffect * weatherEffect * pitchEffect, 0.22, 3.9);
+  lambdaAway = clamp(lambdaAway * refereeEffect * weatherEffect * pitchEffect, 0.2, 3.9);
 
   /* --- Module 01 : estimation de ρ ------------------------------------ */
   const rhoSamplePool = [
@@ -1634,8 +1777,27 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   const rhoBase = rhoBlend > 0 ? rhoFit.rho * rhoBlend + RHO_PRIOR * (1 - rhoBlend) : RHO_PRIOR;
   const rho = clamp(rhoBase + matchup.rhoAdjustment, -0.22, 0.22);
 
-  const matrix = buildScoreMatrix(lambdaHome, lambdaAway, rho);
-  const probs = matrixProbabilities(matrix, lambdaHome, lambdaAway);
+  /* --- Module 01bis : covariance entre les buts des deux équipes ------- */
+  // λ₃ capte les situations partagées (ouverture, erreurs profitables à
+  // l'adversaire) : sans elle, la probabilité de nul est sous-estimée.
+  const covarianceSamples = [
+    ...(input.covarianceSamples || []),
+    ...rhoSamplePool.map(m => ({ homeGoals: m.homeScore, awayGoals: m.awayScore })),
+  ];
+  const covarianceFit = estimateCovariance(covarianceSamples, lambdaHome, lambdaAway);
+  const covariance = covarianceFit.samples >= 20 ? covarianceFit.covariance : 0;
+
+  /* --- Module 01ter : répartition des buts par période ---------------- */
+  const periodFit = estimateFirstHalfShare(input.halfTimeSamples || []);
+
+  const matrix = buildScoreMatrix({
+    lambdaHome,
+    lambdaAway,
+    covariance,
+    rho,
+    maxGoals: 8,
+  });
+  const probs = summariseScoreMatrix(matrix, periodFit.share);
 
   const lambdaTotal = lambdaHome + lambdaAway;
   const overK = (lambda: number, threshold: number) => {
@@ -1643,8 +1805,8 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
     for (let k = 0; k <= threshold; k++) cdf += poissonPmf(k, lambda);
     return Math.max(0, Math.min(1, 1 - cdf));
   };
-  const lH1 = lambdaTotal * 0.44;
-  const lH2 = lambdaTotal * 0.56;
+  const lH1 = lambdaTotal * periodFit.share;
+  const lH2 = lambdaTotal * (1 - periodFit.share);
   const noGoalProb = Math.exp(-lambdaTotal);
 
   const modelBundle: AnalystReport['model'] = {
@@ -1671,7 +1833,16 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   /* --- Module 06 : calibration marché --------------------------------- */
   const market = extractMarket(input.market);
   const completeness = computeCompleteness(home, away, league, input);
-  const modelWeight = clamp(0.78 * (0.72 + 0.4 * completeness), 0.55, 0.86);
+
+  /* --- Module 06 : calibration calibrée sur backtest -------------------- */
+  // Les paramètres (température, poids du marché, seuil de valeur) ne sont
+  // plus des constantes posées à la main : ils proviennent d'un backtest
+  // walk-forward et peuvent être surchargés (backtest, études).
+  const calibration: CalibrationParams = {
+    ...DEFAULT_CALIBRATION,
+    ...(input.calibration || {}),
+  };
+  const modelWeight = clamp(calibration.modelWeight, 0, 1);
 
   const pureModel = {
     home: probs.home,
@@ -1698,10 +1869,18 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
       over25: market.over25,
       btts: market.btts,
     };
+    // Température puis mélange : la température corrige le biais global du
+    // modèle (trop prudent ou trop affirmatif), le mélange arbitre avec le
+    // marché selon le poids MESURÉ.
+    const tempered = applyCalibration(
+      { home: pureModel.home, draw: pureModel.draw, away: pureModel.away },
+      null,
+      calibration
+    ).probs;
     calibrated = {
-      home: modelWeight * pureModel.home + (1 - modelWeight) * market.probs.home,
-      draw: modelWeight * pureModel.draw + (1 - modelWeight) * market.probs.draw,
-      away: modelWeight * pureModel.away + (1 - modelWeight) * market.probs.away,
+      home: modelWeight * tempered.home + (1 - modelWeight) * market.probs.home,
+      draw: modelWeight * tempered.draw + (1 - modelWeight) * market.probs.draw,
+      away: modelWeight * tempered.away + (1 - modelWeight) * market.probs.away,
       over25:
         market.over25 !== null
           ? modelWeight * pureModel.over25 + (1 - modelWeight) * market.over25
@@ -1725,9 +1904,11 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
       { key: 'away', label: `Victoire ${away.name}`, edge: edges.away },
     ].sort((a, b) => b.edge - a.edge);
     const best = ranked[0];
-    if (best.edge >= 0.03) {
+    // Le seuil de « valeur » est celui qui était rentable sur l'historique.
+    const assessment = valueAssessment(best.edge, calibration);
+    if (assessment.isValue) {
       value = { pick: best.key, label: `Valeur détectée : ${best.label}`, edge: round(best.edge, 4) };
-    } else if (best.edge <= -0.05) {
+    } else if (best.edge <= -calibration.valueThreshold) {
       value = { pick: best.key, label: `Le marché est plus optimiste que le modèle (${best.label})`, edge: round(best.edge, 4) };
     }
   }
@@ -1778,7 +1959,13 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   const maxEdge = market ? Math.max(Math.abs(edges.home), Math.abs(edges.draw), Math.abs(edges.away)) : 0;
   const agreement = clamp(1 - maxEdge / 0.15, 0, 1);
   const confidenceScore = Math.round(100 * (0.5 * separation + 0.32 * completeness + 0.18 * agreement));
-  const confidenceLabel = confidenceScore >= 75 ? 'Très élevée' : confidenceScore >= 60 ? 'Élevée' : confidenceScore >= 45 ? 'Modérée' : 'Faible';
+
+  // La confiance affichée n'est plus un score arbitraire : c'est la
+  // probabilité MESURÉE que l'issue retenue par le modèle soit la bonne,
+  // issue d'une régression logistique calibrée sur l'historique.
+  const calibratedConfidenceValue = calibratedConfidence(calibration, separation, agreement);
+  const confidenceInterval = probabilityInterval(calibration, calibratedConfidenceValue.probability);
+  const confidenceLabel = calibratedConfidenceValue.label;
 
   /* --- Synthèse -------------------------------------------------------- */
   const synthesis = buildSynthesis({
@@ -1922,7 +2109,7 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   ];
 
   return {
-    version: '2.0',
+    version: '3.0',
     generatedAt: new Date().toISOString(),
     homeName: home.name,
     awayName: away.name,
@@ -1933,6 +2120,37 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
       completeness: round(completeness, 3),
       separation: round(separation, 3),
       agreement: round(agreement, 3),
+      probability: calibratedConfidenceValue.probability,
+      interval: {
+        low: round(confidenceInterval.low, 4),
+        high: round(confidenceInterval.high, 4),
+      },
+      note:
+        `Probabilité mesurée que l'issue retenue (${simRanked[0].key === 'home' ? home.name : simRanked[0].key === 'away' ? away.name : 'match nul'}) soit la bonne : ` +
+        `${Math.round(calibratedConfidenceValue.probability * 100)} % [${Math.round(confidenceInterval.low * 100)}–${Math.round(confidenceInterval.high * 100)} %] ` +
+        `sur ${calibration.metrics.sampleSize} matchs de référence.`,
+    },
+    calibration: {
+      modelWeight: round(modelWeight, 3),
+      marketWeight: round(1 - modelWeight, 3),
+      sharpness: round(calibration.sharpness, 3),
+      valueThreshold: round(calibration.valueThreshold, 4),
+      effectiveSampleSize: round(calibration.effectiveSampleSize, 1),
+      source: calibration.fittedAt ? 'backtest walk-forward' : 'valeurs par défaut',
+      dataset: calibration.dataset,
+      fittedAt: calibration.fittedAt,
+      sampleSize: calibration.metrics.sampleSize,
+      league: calibration.metrics.league,
+      period: calibration.metrics.period,
+      modelLogLoss: calibration.metrics.modelLogLoss,
+      marketLogLoss: calibration.metrics.marketLogLoss,
+      calibratedLogLoss: calibration.metrics.calibratedLogLoss,
+      naiveLogLoss: calibration.metrics.naiveLogLoss,
+      brier: calibration.metrics.brier,
+      accuracy: calibration.metrics.accuracy,
+      valueRoi: calibration.metrics.valueRoi,
+      valueBets: calibration.metrics.valueBets,
+      limitations: calibration.limitations || [],
     },
     lambdas: {
       home: round(lambdaHome, 2),
@@ -1951,6 +2169,51 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
         rhoFit.samples >= 16
           ? `ρ estimé par moindres carrés sur ${rhoFit.samples} matchs à score bas (stabilisé avec la valeur de référence du championnat).`
           : `Échantillon insuffisant (${rhoFit.samples} matchs) : ρ recadré sur la valeur de référence du championnat.`,
+    },
+    covariance: {
+      value: round(covariance, 4),
+      samples: covarianceFit.samples,
+      fitted: covarianceFit.samples >= 20,
+      note:
+        covarianceFit.samples >= 20
+          ? `Covariance estimée sur ${covarianceFit.samples} matchs : λ₃ = ${round(covariance, 4)}. Les situations partagées (ouverture du match, erreurs profitables à l'adversaire) sont ainsi intégrées.`
+          : `Covariance non estimable (${covarianceFit.samples} matchs) : composante commune fixée à 0.`,
+    },
+    periodSplit: {
+      firstHalfShare: round(periodFit.share, 4),
+      samples: periodFit.samples,
+      fitted: periodFit.fitted,
+      note: periodFit.fitted
+        ? `Répartition estimée sur ${periodFit.samples} matchs avec score à la mi-temps : ${Math.round(periodFit.share * 100)} % des buts marqués en 1re période (référence ${Math.round(0.44 * 100)} %).`
+        : `Répartition des périodes non estimable (${periodFit.samples} matchs) : référence du championnat (44 %) appliquée.`,
+    },
+    shotQuality: {
+      home: shotHome ?? { ...EMPTY_SHOT_PROFILE },
+      away: shotAway ?? { ...EMPTY_SHOT_PROFILE },
+      factorHome: shotFactorHome.factor,
+      factorAway: shotFactorAway.factor,
+      note:
+        shotHome || shotAway
+          ? `Qualité de tir mesurée sur le shotmap : ${shotFactorHome.note} ${shotFactorAway.note}`
+          : 'Aucun shotmap historique exploitable : la finition est estimée sur le ratio buts/xG de saison.',
+    },
+    sequences: {
+      home: sequenceHome,
+      away: sequenceAway,
+      attackFactorHome: seqAttackHome.factor,
+      attackFactorAway: seqAttackAway.factor,
+      defenceFactorHome: seqDefenceHome.factor,
+      defenceFactorAway: seqDefenceAway.factor,
+      note:
+        `Séries (ajustement plafonné à ±4 %, le marché sur-réagissant aux séries) : ${seqAttackHome.note} ${seqAttackAway.note}`,
+    },
+    uncertainty: {
+      home: probabilityInterval(calibration, calibrated.home),
+      draw: probabilityInterval(calibration, calibrated.draw),
+      away: probabilityInterval(calibration, calibrated.away),
+      note:
+        `Intervalles de crédibilité à 80 % (concentration effective n = ${Math.round(calibration.effectiveSampleSize)}) : ` +
+        `la vraie probabilité d'une victoire à domicile se situe entre ${Math.round(probabilityInterval(calibration, calibrated.home).low * 100)} % et ${Math.round(probabilityInterval(calibration, calibrated.home).high * 100)} %.`,
     },
     timeDecay: {
       xi: XI_DECAY,
@@ -2001,11 +2264,17 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
       away: absencesAway,
       officialLineup: {
         available: Boolean(lineupHome || lineupAway),
+        confirmed:
+          Boolean(lineupHome || lineupAway) &&
+          home.lineup?.confirmed !== false &&
+          away.lineup?.confirmed !== false,
         home: lineupHome || undefined,
         away: lineupAway || undefined,
-        note: lineupHome || lineupAway
-          ? 'Compositions officielles intégrées : la force réelle du onze remplace l\'estimation d\'effectif.'
-          : 'Compositions officielles non encore publiées (attendue environ 1 h avant le coup d\'envoi) : estimation d\'effectif utilisée.',
+        note: !lineupHome && !lineupAway
+          ? 'Compositions officielles non encore publiées (attendue environ 1 h avant le coup d\'envoi) : estimation d\'effectif utilisée.'
+          : home.lineup?.confirmed === false || away.lineup?.confirmed === false
+            ? 'Composition(s) PRÉDITE(S) par la source, pas confirmées : pondération divisée par deux, information intégrée mais signalée comme telle.'
+            : 'Compositions officielles confirmées intégrées : la force réelle du onze remplace l\'estimation d\'effectif.',
       },
     },
     tactics: {
@@ -2096,6 +2365,7 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
         foulsPerMatch: foulsPerMatch !== null ? round(foulsPerMatch, 1) : null,
         effect: round(refereeEffect, 4),
         note: refereeNotes.length ? refereeNotes.join(' · ') : 'Profil d\'arbitre indisponible.',
+        profile: refereeProfile,
       },
       weather: {
         temperature: temperature !== null ? round(temperature, 1) : null,
@@ -2104,6 +2374,7 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
         effect: round(weatherEffect, 4),
         note: weatherNotes.length ? weatherNotes.join(' · ') : 'Conditions météo non renseignées.',
       },
+      pitch: pitchProfile,
     },
     simulation: sim,
     synthesis,
