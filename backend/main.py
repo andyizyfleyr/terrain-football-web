@@ -148,6 +148,22 @@ async def debug_espn(league: str = "eng.1", team: str = "306") -> JSONResponse:
             except Exception as exc:  # pragma: no cover - diagnostic
                 entry["error"] = f"{type(exc).__name__}: {exc}"
             report[label] = entry
+
+    # Journal des derniers appels ESPN + test du calendrier d'equipe
+    try:
+        from espn import FETCH_LOG, fetch_team_schedule, parse_iso
+
+        report["fetch_log"] = FETCH_LOG[-12:]
+        history = await fetch_team_schedule(
+            client, league, team, parse_iso("2026-11-22T14:00Z")
+        )
+        report["team_history"] = {
+            "count": len(history),
+            "last": history[-3:],
+        }
+    except Exception as exc:  # pragma: no cover - diagnostic
+        report["probe_error"] = f"{type(exc).__name__}: {exc}"
+
     return JSONResponse(report)
 
 
