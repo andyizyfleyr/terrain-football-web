@@ -61,7 +61,7 @@ export default function MatchAnalysisPage() {
           <span className="navCurrent">Analyse</span>
         </nav>
         <div className="dataStatus">
-          <span className="statusPulse" /> API publique <i /> ESPN
+          <span className="statusPulse" /> API publique <i /> ESPN · FotMob
         </div>
       </header>
 
@@ -78,7 +78,7 @@ export default function MatchAnalysisPage() {
 
       <footer className="appFooter">
         <span>© TERRAIN · FOOTBALL INTELLIGENCE</span>
-        <span>DONNÉES PUBLIQUES ESPN · ESTIMATIONS, JAMAIS DES CERTITUDES</span>
+        <span>DONNÉES PUBLIQUES ESPN & FOTMOB · ESTIMATIONS, JAMAIS DES CERTITUDES</span>
       </footer>
     </main>
   );

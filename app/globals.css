@@ -69,3 +69,60 @@
 
 @media(max-width:760px){.monthMatchesPanel{padding:16px 13px 12px}.monthMatchesActions{width:100%}.monthSearch{flex:1;min-width:180px}.monthCardsGrid{grid-template-columns:1fr;gap:10px}.matchPageBody{margin:14px auto 6px}.statusTabsBar{gap:6px;padding-bottom:11px;margin-bottom:12px}.statusTabButton{height:32px;padding:0 11px;font-size:10.5px}}
 @media(max-width:430px){.monthSearch{width:100%;flex-basis:100%}.monthScanButton{flex:1}.finalScoreBox strong{font-size:17px}}
+
+/* Enrichissement FotMob (blessés/suspendus, vrais xG, H2H, arbitre, insights) */
+.analysisTopBadges{display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-end;gap:7px}
+.fotmobActivePill{padding:5px 8px;border:1px solid #cce7d5;border-radius:5px;background:#eaf6ee;color:#187344;font:600 8px 'DM Mono',monospace;letter-spacing:.6px;white-space:nowrap}
+.xgHeroRow{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:10px 22px}
+.xgRealSummary{padding-left:18px;border-left:1px solid #dfeae2}
+.xgRealSummary b{color:#2f6393}
+.tabCountTag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;background:#fff1e8;color:#a84c2b;font:600 8px 'DM Mono',monospace;vertical-align:middle}
+
+.squadQuickBanner{margin:0 19px 12px;padding:11px 12px;border:1px solid #e4ece6;border-radius:10px;background:linear-gradient(135deg,#fafdfb,#f3f8f5)}
+.squadQuickHeader{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.squadQuickHeader span{color:#2c6a45;font:600 8.5px 'DM Mono',monospace;letter-spacing:.7px}
+.squadQuickHeader button{border:0;background:none;color:var(--green);font:600 9px 'DM Sans',sans-serif;cursor:pointer;padding:0}
+.squadQuickCols{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.squadQuickCols>div+div{padding-left:10px;border-left:1px solid #e6eee8}
+.squadQuickCols small{display:block;color:#7f8e85;font:600 8px 'DM Mono',monospace;text-transform:uppercase}
+.squadQuickCols p{margin:3px 0 0;color:#41564a;font-size:9px;line-height:1.45}
+
+.fotmobInsightsBox{margin:0 19px 12px;padding:11px 13px;border:1px solid #e5ede7;border-radius:10px;background:#fbfdfb}
+.fotmobInsightsBox ul{margin:6px 0 0;padding-left:15px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px 14px}
+.fotmobInsightsBox li{color:#4d6054;font-size:9px;line-height:1.42}
+
+.factorSourceBadge{margin-left:auto;padding:2px 6px;border-radius:4px;background:#f1f7f3;border:1px solid #dfece3;color:#3d7350;font:500 7.5px 'DM Mono',monospace;font-style:normal}
+.factorValBody p{margin:4px 0 0;color:#53655a;font-size:9px;line-height:1.45}
+
+.absenceNone{margin:4px 0 0;color:#2c774b!important;font-weight:500}
+.absenceList{display:flex;flex-direction:column;gap:4px;margin-top:5px}
+.absenceChip{display:inline-flex;align-items:center;flex-wrap:wrap;gap:5px;padding:3px 6px;border:1px solid #edf1ee;border-radius:6px;background:#fafcfa;font-size:8.5px;line-height:1.3}
+.absenceChip.absenceKey{border-color:#ebd7cb;background:#fffaf7}
+.absenceChip b{color:#283a2f;font-weight:600}
+.absenceChip small{padding:1px 4px;border-radius:3px;background:#eef2ef;color:#68776e;font:500 7.5px 'DM Mono',monospace}
+.absenceChip em{margin-left:auto;font:600 7.5px 'DM Mono',monospace;font-style:normal}
+.absDot{width:5px;height:5px;border-radius:50%;flex:none}
+.absDot.absTagInj{background:#c55b3c}
+.absDot.absTagSusp{background:#c93535}
+.absDot.absTagDoubt{background:#cf9127}
+.absenceChip em.absTagInj{color:#b04f32}
+.absenceChip em.absTagSusp{color:#b92b2b}
+.absenceChip em.absTagDoubt{color:#a87216}
+.absenceMore{color:#88958d;font-size:8px;margin-top:2px}
+
+.statsRichBlock{display:flex;flex-direction:column;gap:5px;margin-top:4px}
+.statsRichBlock p{margin:0!important}
+.xgMiniPill{display:inline-block;padding:3px 6px;border-radius:5px;background:#eff6f1;border:1px solid #ddebe1;color:#356647;font:500 8px 'DM Mono',monospace;line-height:1.35}
+.xgMiniPill b{color:#175c37}
+
+.h2hMiniList{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.h2hMiniChip{display:inline-flex;align-items:center;gap:5px;padding:3px 7px;border:1px solid #e8efea;border-radius:6px;background:#f8fbf9;font-size:8px;color:#44594c}
+.h2hMiniChip small{color:#88968d;font:500 7.5px 'DM Mono',monospace}
+.h2hMiniChip b{font-weight:600}
+
+@media(max-width:760px){
+  .squadQuickBanner,.fotmobInsightsBox{margin:0 14px 10px}
+  .squadQuickCols,.fotmobInsightsBox ul{grid-template-columns:1fr}
+  .squadQuickCols>div+div{padding-left:0;padding-top:7px;border-left:0;border-top:1px solid #e6eee8}
+  .xgRealSummary{padding-left:0;border-left:0}
+}
