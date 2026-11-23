@@ -14,6 +14,10 @@
  * des données publiques et restent des estimations (jamais des certitudes).
  */
 
+import { devigPower, devigShin, devigThreeWayDecimal, devigTwoWayDecimal } from './devig';
+
+export { devigPower, devigShin, devigThreeWayDecimal, devigTwoWayDecimal, normaliseProbs } from './devig';
+
 /* ------------------------------------------------------------------ */
 /* Utilitaires                                                         */
 /* ------------------------------------------------------------------ */
@@ -339,12 +343,29 @@ export type AnalystReport = {
     available: boolean;
     method: string;
     overround: number;
-    devigged: { home: number; draw: number; away: number; over25: number | null };
-    pureModel: { home: number; draw: number; away: number; over25: number };
-    calibrated: { home: number; draw: number; away: number; over25: number };
+    devigged: { home: number; draw: number; away: number; over25: number | null; btts: number | null };
+    pureModel: { home: number; draw: number; away: number; over25: number; btts: number };
+    calibrated: { home: number; draw: number; away: number; over25: number; btts: number };
     weights: { model: number; market: number };
-    edges: { home: number; draw: number; away: number; over25: number | null };
+    edges: { home: number; draw: number; away: number; over25: number | null; btts: number | null };
     value: { pick: string; label: string; edge: number };
+    odds: {
+      home: number;
+      draw: number;
+      away: number;
+      over25: number | null;
+      under25: number | null;
+      bttsYes: number | null;
+      bttsNo: number | null;
+      drawNoBetHome: number | null;
+      drawNoBetAway: number | null;
+    };
+    markets: string[];
+    source: string;
+    oddsProvider: string | null;
+    oddsProviderKey: string | null;
+    oddsProviderHonored: boolean | null;
+    oddsFetchedAt: string | null;
     note: string;
   };
   context: {
@@ -995,58 +1016,6 @@ function tacticalMatchup(home: TacticalProfile, away: TacticalProfile): Tactical
 /* MODULE 06 — Calibration bayésienne avec le marché                   */
 /* ------------------------------------------------------------------ */
 
-function normaliseProbs(values: number[]): number[] {
-  const total = values.reduce((a, b) => a + b, 0);
-  if (total <= 0) return values.map(() => 1 / values.length);
-  return values.map(v => v / total);
-}
-
-/** Méthode « power » : retrait de marge proportionnel à la puissance des cotes */
-function devigPower(implied: number[]): { probs: number[]; overround: number } {
-  const overround = implied.reduce((a, b) => a + b, 0);
-  if (!implied.length || overround <= 0) return { probs: normaliseProbs(implied), overround };
-  let lo = 0.2;
-  let hi = 3;
-  for (let i = 0; i < 60; i++) {
-    const mid = (lo + hi) / 2;
-    const sum = implied.reduce((acc, q) => acc + Math.pow(q, mid), 0);
-    if (sum > 1) lo = mid;
-    else hi = mid;
-  }
-  const k = (lo + hi) / 2;
-  return { probs: normaliseProbs(implied.map(q => Math.pow(q, k))), overround };
-}
-
-/** Méthode de Shin : retrait de marge corrigé du biais « favorite-longshot » */
-function devigShin(implied: number[]): { probs: number[]; overround: number } | null {
-  if (implied.length < 2) return null;
-  const overround = implied.reduce((a, b) => a + b, 0);
-  if (overround <= 1.0001) return { probs: normaliseProbs(implied), overround };
-  const sumSq = implied.reduce((a, b) => a + b * b, 0);
-  if (sumSq <= 0) return null;
-
-  const shinProb = (z: number): number[] => {
-    const out: number[] = [];
-    for (const q of implied) {
-      const inner = z * z + ((4 * (1 - z) * q * q) / sumSq);
-      const value = (Math.sqrt(Math.max(0, inner)) - z) / (2 * (1 - z));
-      out.push(Math.max(0.0001, value));
-    }
-    return normaliseProbs(out);
-  };
-
-  let lo = 0;
-  let hi = 0.6;
-  for (let i = 0; i < 60; i++) {
-    const mid = (lo + hi) / 2;
-    const sum = shinProb(mid).reduce((a, b) => a + b, 0);
-    if (sum > 1) lo = mid;
-    else hi = mid;
-  }
-  const z = (lo + hi) / 2;
-  return { probs: shinProb(z), overround };
-}
-
 function extractMarket(market: any) {
   if (!market || typeof market !== 'object') return null;
   const read = (keys: string[]): number | null => {
@@ -1062,12 +1031,18 @@ function extractMarket(market: any) {
   if (home === null || draw === null || away === null) return null;
   const over25 = read(['over25', 'over_2_5']);
   const under25 = read(['under25', 'under_2_5']);
+  const bttsYes = read(['bttsYes', 'btts_yes']);
+  const bttsNo = read(['bttsNo', 'btts_no']);
 
   // Les valeurs > 1.5 sont des cotes décimales, sinon ce sont des probabilités.
-  const isDecimal = home > 1.5 || draw > 1.5 || away > 1.5;
+  // `format: 'decimal'` force la lecture de cotes décimales (payload cotes réelles).
+  const isDecimal =
+    market.format === 'decimal' ? true : market.format === 'probability' ? false : home > 1.5 || draw > 1.5 || away > 1.5;
   const impliedRaw = isDecimal ? [1 / home, 1 / draw, 1 / away] : [home, draw, away];
   const over25Raw = over25 !== null ? (isDecimal ? 1 / over25 : over25) : null;
   const under25Raw = under25 !== null ? (isDecimal ? 1 / under25 : under25) : null;
+  const bttsYesRaw = bttsYes !== null ? (isDecimal ? 1 / bttsYes : bttsYes) : null;
+  const bttsNoRaw = bttsNo !== null ? (isDecimal ? 1 / bttsNo : bttsNo) : null;
 
   const shin = devigShin(impliedRaw);
   const devig = shin || devigPower(impliedRaw);
@@ -1081,6 +1056,13 @@ function extractMarket(market: any) {
     over25Prob = isDecimal ? clamp(over25Raw, 0.05, 0.95) : clamp(over25Raw, 0.02, 0.98);
   }
 
+  let bttsProb: number | null = null;
+  if (bttsYesRaw !== null && bttsNoRaw !== null) {
+    bttsProb = bttsYesRaw / (bttsYesRaw + bttsNoRaw);
+  } else if (bttsYesRaw !== null) {
+    bttsProb = isDecimal ? clamp(bttsYesRaw, 0.03, 0.97) : clamp(bttsYesRaw, 0.02, 0.98);
+  }
+
   return {
     method,
     overround: round(devig.overround, 4),
@@ -1090,7 +1072,29 @@ function extractMarket(market: any) {
       away: devig.probs[2],
     },
     over25: over25Prob,
-    raw: { home, draw, away, over25 },
+    btts: bttsProb,
+    raw: { home, draw, away, over25, under25, bttsYes, bttsNo },
+    // Cotes décimales publiées (utilisées pour l'affichage du marché)
+    odds: {
+      home,
+      draw,
+      away,
+      over25,
+      under25,
+      bttsYes,
+      bttsNo,
+      drawNoBetHome: read(['drawNoBetHome']),
+      drawNoBetAway: read(['drawNoBetAway']),
+    },
+    markets: Array.isArray(market.markets) ? market.markets : [],
+    source: typeof market.source === 'string' ? market.source : 'Cotes de marché publiques',
+    goalLines: Array.isArray(market.goalLines) ? market.goalLines : [],
+    // Fournisseur réellement résolu par la source de cotes (on ne suppose
+    // jamais que l'opérateur demandé a été honoré).
+    provider: market.provider && typeof market.provider === 'object' ? market.provider : null,
+    providerLabel: typeof market.providerLabel === 'string' ? market.providerLabel : null,
+    providerHonored: typeof market.providerHonored === 'boolean' ? market.providerHonored : null,
+    fetchedAt: typeof market.fetchedAt === 'string' ? market.fetchedAt : null,
   };
 }
 
@@ -1674,11 +1678,12 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
     draw: probs.draw,
     away: probs.away,
     over25: probs.over25,
+    btts: probs.btts,
   };
 
   let calibrated = { ...pureModel };
-  let devigged = { home: 0, draw: 0, away: 0, over25: null as number | null };
-  let edges = { home: 0, draw: 0, away: 0, over25: null as number | null };
+  let devigged = { home: 0, draw: 0, away: 0, over25: null as number | null, btts: null as number | null };
+  let edges = { home: 0, draw: 0, away: 0, over25: null as number | null, btts: null as number | null };
   let value = { pick: '', label: 'Aucune valeur nette détectée', edge: 0 };
   let method = 'aucun marché';
   let overround = 0;
@@ -1691,6 +1696,7 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
       draw: market.probs.draw,
       away: market.probs.away,
       over25: market.over25,
+      btts: market.btts,
     };
     calibrated = {
       home: modelWeight * pureModel.home + (1 - modelWeight) * market.probs.home,
@@ -1700,12 +1706,17 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
         market.over25 !== null
           ? modelWeight * pureModel.over25 + (1 - modelWeight) * market.over25
           : pureModel.over25,
+      btts:
+        market.btts !== null
+          ? modelWeight * pureModel.btts + (1 - modelWeight) * market.btts
+          : pureModel.btts,
     };
     edges = {
       home: calibrated.home - market.probs.home,
       draw: calibrated.draw - market.probs.draw,
       away: calibrated.away - market.probs.away,
       over25: market.over25 !== null ? calibrated.over25 - market.over25 : null,
+      btts: market.btts !== null ? calibrated.btts - market.btts : null,
     };
 
     const ranked = [
@@ -2017,18 +2028,21 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
         draw: round(devigged.draw, 4),
         away: round(devigged.away, 4),
         over25: devigged.over25 !== null ? round(devigged.over25, 4) : null,
+        btts: devigged.btts !== null ? round(devigged.btts, 4) : null,
       },
       pureModel: {
         home: round(pureModel.home, 4),
         draw: round(pureModel.draw, 4),
         away: round(pureModel.away, 4),
         over25: round(pureModel.over25, 4),
+        btts: round(pureModel.btts, 4),
       },
       calibrated: {
         home: round(calibrated.home, 4),
         draw: round(calibrated.draw, 4),
         away: round(calibrated.away, 4),
         over25: round(calibrated.over25, 4),
+        btts: round(calibrated.btts, 4),
       },
       weights: { model: round(modelWeight, 3), market: round(1 - modelWeight, 3) },
       edges: {
@@ -2036,11 +2050,33 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
         draw: round(edges.draw, 4),
         away: round(edges.away, 4),
         over25: edges.over25 !== null ? round(edges.over25, 4) : null,
+        btts: edges.btts !== null ? round(edges.btts, 4) : null,
       },
       value,
+      odds: {
+        home: market?.odds?.home ?? 0,
+        draw: market?.odds?.draw ?? 0,
+        away: market?.odds?.away ?? 0,
+        over25: market?.odds?.over25 ?? null,
+        under25: market?.odds?.under25 ?? null,
+        bttsYes: market?.odds?.bttsYes ?? null,
+        bttsNo: market?.odds?.bttsNo ?? null,
+        drawNoBetHome: market?.odds?.drawNoBetHome ?? null,
+        drawNoBetAway: market?.odds?.drawNoBetAway ?? null,
+      },
+      markets: market?.markets ?? [],
+      source: market?.source ?? 'Cotes de marché publiques',
+      oddsProvider: market?.providerLabel ?? null,
+      oddsProviderKey: market?.provider?.key ?? null,
+      oddsProviderHonored: market?.providerHonored ?? null,
+      oddsFetchedAt: market?.fetchedAt ?? null,
       note: market
-        ? `Marge bookmaker retirée par la méthode ${method} (surcharge ${Math.max(0, Math.round((overround - 1) * 1000) / 10)} %). ` +
-          `Le modèle pur conserve ${Math.round(modelWeight * 100)} % de la décision finale, le marché ${Math.round((1 - modelWeight) * 100)} %.`
+        ? `Cotes de marché réelles retraitées par la méthode ${method} (surcharge ${Math.max(0, Math.round((overround - 1) * 1000) / 10)} %). ` +
+          `Le modèle pur conserve ${Math.round(modelWeight * 100)} % de la décision finale, le marché ${Math.round((1 - modelWeight) * 100)} %.` +
+          (market.providerLabel
+            ? ` Source des cotes : ${market.providerLabel}${market.providerHonored === false ? ' (opérateur demandé indisponible, opérateur servi affiché)' : ''}.`
+            : '') +
+          (market.markets?.length ? ` Marchés utilisés : ${market.markets.join(', ')}.` : '')
         : 'Aucune cote disponible : le modèle pur est conservé sans calibrage de marché.',
     },
     context: {
@@ -2198,7 +2234,7 @@ function buildSynthesis(s: SynthesisInput): AnalystReport['synthesis'] {
 
   if (s.market) {
     bullets.push(
-      `Marché : cotes retraitées (marge ${Math.round((s.market.overround - 1) * 1000) / 10} % retirée). ` +
+      `Marché : cotes réelles retraitées (marge ${Math.round((s.market.overround - 1) * 1000) / 10} % retirée). ` +
         `Modèle pur ${pctFr(s.pureModel.home)} / ${pctFr(s.pureModel.draw)} / ${pctFr(s.pureModel.away)} contre marché ${pctFr(
           s.market.probs.home
         )} / ${pctFr(s.market.probs.draw)} / ${pctFr(s.market.probs.away)}.`

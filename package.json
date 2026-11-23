@@ -5,7 +5,12 @@
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0",
     "build": "next build",
-    "start": "next start --hostname 0.0.0.0"
+    "start": "next start --hostname 0.0.0.0",
+    "check:devig": "node --experimental-strip-types --import ./scripts/register-ts-hook.mjs scripts/devig-reference-check.ts",
+    "check:market": "node --experimental-strip-types --import ./scripts/register-ts-hook.mjs scripts/market-odds-check.ts",
+    "check:market:integration": "node --experimental-strip-types --import ./scripts/register-ts-hook.mjs scripts/market-integration-check.ts",
+    "check:market:fetch": "node --experimental-strip-types --import ./scripts/register-ts-hook.mjs scripts/market-fetch-check.ts",
+    "check": "npm run check:devig && npm run check:market && npm run check:market:integration && npm run check:market:fetch"
   },
   "dependencies": {
     "next": "16.4.6",

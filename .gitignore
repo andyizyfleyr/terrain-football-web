@@ -5,3 +5,6 @@ dist/
 .vercel/
 .env*.local
 *.tsbuildinfo
+
+# Captures de la refonte (artefacts locaux, non versionnés)
+.captures/

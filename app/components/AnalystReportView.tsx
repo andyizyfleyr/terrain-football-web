@@ -12,6 +12,21 @@ function fmtSigned(value: any): string {
   return `${pts > 0 ? '+' : ''}${pts} pts`;
 }
 
+function fmtOdd(value: any): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  return value.toFixed(2).replace('.', ',');
+}
+
+/** Heure d'extraction des cotes, au format français court. */
+function formatFetchedAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })} à ${date.toLocaleTimeString('fr-FR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })}`;
+}
+
 function statusLabel(status: string): string {
   if (status === 'ok') return 'Actif';
   if (status === 'partial') return 'Partiel';
@@ -50,6 +65,36 @@ export function AnalystReportView({ analyst }: { analyst: any }) {
     { label: 'Match nul', model: market.pureModel?.draw, calibrated: market.calibrated?.draw, market: market.devigged?.draw, edge: market.edges?.draw },
     { label: `Victoire ${awayName}`, model: market.pureModel?.away, calibrated: market.calibrated?.away, market: market.devigged?.away, edge: market.edges?.away },
   ];
+
+  // Cotes bookmaker réelles (1X2 + marchés de soutien) et probabilités de marché
+  // après retrait de la marge : ce sont ces valeurs qui calibrent le modèle.
+  const marketOdds = market.odds || {};
+  const oddsChips = [
+    { label: `1 · ${homeName}`, value: marketOdds.home },
+    { label: 'X · Nul', value: marketOdds.draw },
+    { label: `2 · ${awayName}`, value: marketOdds.away },
+    { label: '+2,5 buts', value: marketOdds.over25 },
+    { label: '-2,5 buts', value: marketOdds.under25 },
+    { label: 'Les deux marquent', value: marketOdds.bttsYes },
+    { label: 'Personne ne marque', value: marketOdds.bttsNo },
+  ].filter(chip => typeof chip.value === 'number' && Number.isFinite(chip.value));
+
+  const supportRows = [
+    {
+      label: 'Plus de 2,5 buts',
+      model: market.pureModel?.over25,
+      calibrated: market.calibrated?.over25,
+      market: market.devigged?.over25,
+      edge: market.edges?.over25,
+    },
+    {
+      label: 'Les deux équipes marquent',
+      model: market.pureModel?.btts,
+      calibrated: market.calibrated?.btts,
+      market: market.devigged?.btts,
+      edge: market.edges?.btts,
+    },
+  ].filter(row => typeof row.market === 'number' && Number.isFinite(row.market));
 
   return (
     <div className="analystArea">
@@ -109,6 +154,26 @@ export function AnalystReportView({ analyst }: { analyst: any }) {
               <em className={(row.edge ?? 0) >= 0 ? 'edgePos' : 'edgeNeg'}>{fmtSigned(row.edge)}</em>
             </div>
           ))}
+          {supportRows.length ? (
+            <>
+              <div className="analystEdgeHead analystEdgeHeadSub">
+                <span>MARCHÉ DE SOUTIEN</span>
+                <span>MODÈLE PUR</span>
+                <span>CALIBRÉ</span>
+                <span>MARCHÉ</span>
+                <span>ÉCART</span>
+              </div>
+              {supportRows.map(row => (
+                <div className="analystEdgeRow" key={row.label}>
+                  <span>{row.label}</span>
+                  <b>{fmtPct(row.model)}</b>
+                  <b className="analystEdgeCalib">{fmtPct(row.calibrated)}</b>
+                  <b>{fmtPct(row.market)}</b>
+                  <em className={(row.edge ?? 0) >= 0 ? 'edgePos' : 'edgeNeg'}>{fmtSigned(row.edge)}</em>
+                </div>
+              ))}
+            </>
+          ) : null}
           {market.available ? (
             <div className="analystEdgeFoot">
               <span>Poids modèle {Math.round((market.weights?.model ?? 0) * 100)} % / marché {Math.round((market.weights?.market ?? 0) * 100)} %</span>
@@ -120,6 +185,32 @@ export function AnalystReportView({ analyst }: { analyst: any }) {
             </div>
           )}
         </div>
+        {oddsChips.length ? (
+          <div className="analystOddsPanel">
+            <div className="analystOddsHead">
+              <span className="sectionKicker">COTES BOOKMAKER RÉELLES</span>
+              <span className="analystOddsSource">
+                {market.oddsProvider ? `Source : ${market.oddsProvider}` : market.source}
+              </span>
+            </div>
+            <div className="analystOddsChips">
+              {oddsChips.map(chip => (
+                <span className="analystOddsChip" key={chip.label}>
+                  <em>{chip.label}</em>
+                  <b>{fmtOdd(chip.value)}</b>
+                </span>
+              ))}
+            </div>
+            <p className="analystOddsNote">
+              Cotes décimales observées chez les bookmakers. Les probabilités « marché » ci-dessus sont ces cotes converties puis
+              corrigées de la marge ({market.method}).
+              {market.oddsFetchedAt ? ` Extraction : ${formatFetchedAt(market.oddsFetchedAt)}.` : ''}
+              {market.oddsProviderHonored === false
+                ? ' Opérateur demandé indisponible : l’opérateur réellement servi est affiché.'
+                : ''}
+            </p>
+          </div>
+        ) : null}
         {market.value?.pick ? (
           <div className="analystValueBanner">
             <span>◆</span>

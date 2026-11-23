@@ -7,7 +7,8 @@
 // - Historique multi-saisons des confrontations directes (H2H)
 // - Météo & insights FotMob/Opta
 
-import {
+import { runQuantitativeAnalyst } from './analystEngine';
+import type {
   AnalystInput,
   AnalystLineup,
   AnalystRecentMatch,
@@ -15,8 +16,10 @@ import {
   AnalystStatEntry,
   AnalystTableRow,
   AnalystTeamInput,
-  runQuantitativeAnalyst,
 } from './analystEngine';
+import { devigMarketOdds, mergeMarketOdds, oddsToMarketPayload, parseMarketOdds } from './marketOdds';
+import type { MarketOdds, MarketProvider, ParsedOdds } from './marketOdds';
+import { devigThreeWayDecimal } from './devig';
 
 const FOTMOB_BASE = 'https://www.fotmob.com/api/data';
 const FOTMOB_HEADERS: Record<string, string> = {
@@ -263,6 +266,201 @@ export async function getFotmobMatchesForDate(compactDate: string): Promise<Fotm
     }
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* COTES DE MARCHÉ RÉELLES                                             */
+/* ------------------------------------------------------------------ */
+/*
+ * Les cotes sont récupérées depuis le flux public de marché de la source
+ * de données football. On interroge plusieurs variantes (pays + opérateur)
+ * afin de maximiser la couverture :
+ *   1. le marché qui expose le plus de marchés (1X2, O/U 2,5, BTTS, DNB),
+ *   2. les marchés de repli lorsque le premier ne renvoie pas de cotes.
+ * Les résultats sont fusionnés pour disposer, si possible, du trio
+ * 1X2 + total de buts 2,5 + les deux équipes marquent.
+ */
+const ODDS_ENDPOINTS: { country: string; provider?: string }[] = [
+  { country: 'ESP', provider: '1xBet_Spain' },
+  { country: 'ESP' },
+  { country: 'FRA' },
+  { country: 'GBR' },
+  { country: 'DEU' },
+];
+
+export type FotmobMarketOdds = {
+  available: boolean;
+  odds: MarketOdds | null;
+  parsed: ParsedOdds | null;
+  payload: any | null;
+  /** Opérateur réellement servi pour le trio 1X2 (source des cotes affichées) */
+  provider: MarketProvider | null;
+  /** Journal des points de vente consultés et de leur résolution */
+  sources: {
+    country: string;
+    requested: string | null;
+    resolved: string | null;
+    honored: boolean;
+    used: boolean;
+  }[];
+  /** Timestamp de la dernière extraction */
+  fetchedAt: string | null;
+};
+
+export async function fetchFotmobMarketOdds(params: {
+  fotmobMatchId: number | string;
+  homeName?: string;
+  awayName?: string;
+}): Promise<FotmobMarketOdds> {
+  const matchId = Number(params.fotmobMatchId);
+  const empty: FotmobMarketOdds = {
+    available: false,
+    odds: null,
+    parsed: null,
+    payload: null,
+    provider: null,
+    sources: [],
+    fetchedAt: null,
+  };
+  if (!Number.isFinite(matchId) || matchId <= 0) return empty;
+
+  const homeName = params.homeName || '';
+  const awayName = params.awayName || '';
+
+  const buildQuery = (endpoint: { country: string; provider?: string }): string =>
+    endpoint.provider
+      ? `matchOdds?matchId=${matchId}&ccode3=${endpoint.country}&bettingProvider=${encodeURIComponent(endpoint.provider)}`
+      : `matchOdds?matchId=${matchId}&ccode3=${endpoint.country}`;
+
+  const sources: FotmobMarketOdds['sources'] = [];
+  let merged: MarketOdds | null = null;
+  let mergedPayload: any = null;
+
+  /**
+   * Intègre une réponse dans le cumul et journalise le point de vente.
+   * L'opérateur ayant fourni le trio 1X2 reste celui qui est affiché.
+   */
+  const integrate = (endpoint: { country: string; provider?: string }, payload: any) => {
+    const parsed = parseMarketOdds(payload, homeName, awayName, endpoint.provider ?? null);
+    const source = {
+      country: endpoint.country,
+      requested: endpoint.provider ?? null,
+      resolved: parsed.provider?.key ?? null,
+      honored: parsed.provider?.honored ?? false,
+      used: false,
+    };
+    sources.push(source);
+    if (!parsed.home || !parsed.draw || !parsed.away) return;
+    const isPrimary = merged === null;
+    merged = merged ? mergeMarketOdds(merged, parsed) : parsed;
+    if (isPrimary) source.used = true;
+    mergedPayload = mergedPayload ?? payload;
+  };
+
+  const hasFullCoverage = (): boolean =>
+    !!merged && !!merged.over25 && !!merged.under25 && !!merged.bttsYes && !!merged.bttsNo;
+
+  // 1. Point de vente prioritaire : une seule requête dans le cas nominal.
+  const primaryPayload = await fetchFotmobJson<any>(buildQuery(ODDS_ENDPOINTS[0]), 120, 4000);
+  if (primaryPayload) integrate(ODDS_ENDPOINTS[0], primaryPayload);
+
+  // 2. Points de vente de repli : interrogés en parallèle pour ne pas
+  //    cumuler les temps d'attente, puis fusionnés par ordre de priorité.
+  if (!hasFullCoverage()) {
+    const fallbacks = ODDS_ENDPOINTS.slice(1);
+    const payloads = await Promise.all(fallbacks.map(endpoint => fetchFotmobJson<any>(buildQuery(endpoint), 120, 4000)));
+    fallbacks.forEach((endpoint, index) => {
+      const payload = payloads[index];
+      if (payload) integrate(endpoint, payload);
+    });
+  }
+
+  if (!merged) return { ...empty, sources, fetchedAt: null };
+
+  const parsed = devigMarketOdds(merged);
+  return {
+    available: parsed.available,
+    odds: merged,
+    parsed,
+    payload: mergedPayload,
+    provider: merged.provider ?? null,
+    sources,
+    fetchedAt: merged.fetchedAt || null,
+  };
+}
+
+/**
+ * Résolution du marché de référence utilisé par l'analyse et la vigilance.
+ *
+ * Priorité aux cotes bookmaker réelles. Si le flux de marché est injoignable,
+ * on retombe sur le marché amont (cotes décimales ou probabilités) afin de
+ * ne jamais laisser l'analyse sans repère de marché — mais en conservant
+ * une source unique pour les deux chemins de calcul.
+ */
+function resolveMarketSource(
+  marketOdds: FotmobMarketOdds,
+  upstreamMarket: any
+): {
+  payload: any | null;
+  probs: { home: number; draw: number; away: number; over25: number | null } | null;
+  provider: MarketProvider | null;
+  fetchedAt: string | null;
+  origin: 'public' | 'upstream' | null;
+} {
+  // 1. Cotes bookmaker réelles
+  const payload = oddsToMarketPayload(marketOdds.odds);
+  if (payload && marketOdds.parsed?.available) {
+    return {
+      payload,
+      probs: {
+        home: marketOdds.parsed.probabilities.home,
+        draw: marketOdds.parsed.probabilities.draw,
+        away: marketOdds.parsed.probabilities.away,
+        over25: marketOdds.parsed.probabilities.over25,
+      },
+      provider: marketOdds.provider ?? null,
+      fetchedAt: marketOdds.fetchedAt || marketOdds.odds?.fetchedAt || null,
+      origin: 'public',
+    };
+  }
+
+  // 2. Repli sur le marché amont
+  const home = Number(upstreamMarket?.home);
+  const draw = Number(upstreamMarket?.draw);
+  const away = Number(upstreamMarket?.away);
+  if (!Number.isFinite(home) || !Number.isFinite(draw) || !Number.isFinite(away)) {
+    return { payload: null, probs: null, provider: null, fetchedAt: null, origin: null };
+  }
+  if (home <= 0 || draw <= 0 || away <= 0) {
+    return { payload: null, probs: null, provider: null, fetchedAt: null, origin: null };
+  }
+
+  const looksDecimal = home > 1.5 || draw > 1.5 || away > 1.5;
+  if (looksDecimal) {
+    const devig = devigThreeWayDecimal({ home, draw, away });
+    return {
+      payload: { format: 'decimal', home, draw, away, source: 'Cotes de marché publiques' },
+      probs: devig
+        ? { home: devig.probs.home, draw: devig.probs.draw, away: devig.probs.away, over25: null }
+        : null,
+      provider: null,
+      fetchedAt: null,
+      origin: 'upstream',
+    };
+  }
+
+  // Probabilités pures : on les normalise pour disposer d'un repère comparable.
+  const total = home + draw + away;
+  if (!(total > 0)) {
+    return { payload: null, probs: null, provider: null, fetchedAt: null, origin: null };
+  }
+  return {
+    payload: { format: 'probability', home, draw, away, source: 'Cotes de marché publiques' },
+    probs: { home: home / total, draw: draw / total, away: away / total, over25: null },
+    provider: null,
+    fetchedAt: null,
+    origin: 'upstream',
+  };
 }
 
 export async function findFotmobMatchForEspn(params: {
@@ -1297,6 +1495,13 @@ export async function enrichEspnMatchWithFotmob(params: {
   let awayTeamPayload: any = null;
   let leagueTablePayload: any = null;
 
+  // Cotes de marché réelles (1X2, O/U 2,5, BTTS) — source de marché du moteur quantitatif
+  const marketOddsPromise = fetchFotmobMarketOdds({
+    fotmobMatchId: matchedDayItem.id,
+    homeName: espnMatch.home.name,
+    awayName: espnMatch.away.name,
+  });
+
   if (deepTeamFetch) {
     [homeTeamPayload, awayTeamPayload, leagueTablePayload] = await Promise.all([
       homeTeamId ? fetchFotmobJson<any>(`teams?id=${homeTeamId}`, 600) : Promise.resolve(null),
@@ -1306,6 +1511,18 @@ export async function enrichEspnMatchWithFotmob(params: {
   } else if (parentLeagueId) {
     leagueTablePayload = await fetchFotmobJson<any>(`tltable?leagueId=${parentLeagueId}`, 600);
   }
+
+  const marketOdds = await marketOddsPromise;
+  // Résolution du marché : une source unique pour l'analyse ET la vigilance.
+  //  1. cotes bookmaker réelles (source publique) quand elles sont disponibles,
+  //  2. repli sur le marché amont si le flux de cotes est injoignable.
+  const marketSource = resolveMarketSource(marketOdds, espnMatch.market);
+  const marketPayload = marketSource.payload;
+  // Probabilités de marché déjà dé-vigguées (utilisées pour la vigilance).
+  const marketProbs = marketSource.probs;
+  // Provenance des cotes : opérateur réellement servi et heure d'extraction.
+  const marketProvider = marketSource.provider;
+  const marketFetchedAt = marketSource.fetchedAt;
 
   const homeSquad = extractSquadInfo(homeTeamPayload);
   const awaySquad = extractSquadInfo(awayTeamPayload);
@@ -1409,7 +1626,7 @@ export async function enrichEspnMatchWithFotmob(params: {
         kickoffIso: espnMatch.date || new Date().toISOString(),
         matchId: String(matchedDayItem.id),
         baseLambdas: { home: adjLambdaHome, away: adjLambdaAway },
-        market: espnMatch.market,
+        market: marketPayload,
         referee,
         weather: fotmobWeather,
         h2h: h2hEnriched
@@ -1443,12 +1660,14 @@ export async function enrichEspnMatchWithFotmob(params: {
     const shareHome = total > 0 ? analystReport.lambdas.home / total : 0.5;
 
     finalExpectedGoals = { home: analystReport.lambdas.home, away: analystReport.lambdas.away };
+    // BTTS : probabilité calibrée sur les cotes de marché réelles quand elles sont disponibles.
+    const bttsCalibrated = analystReport.market.calibrated.btts ?? analystReport.model.btts;
     finalProbabilities = {
       home: analystReport.market.calibrated.home,
       draw: analystReport.market.calibrated.draw,
       away: analystReport.market.calibrated.away,
-      bttsYes: analystReport.model.btts,
-      bttsNo: Number((1 - analystReport.model.btts).toFixed(4)),
+      bttsYes: bttsCalibrated,
+      bttsNo: Number((1 - bttsCalibrated).toFixed(4)),
       over15: analystReport.model.over15,
       under15: Number((1 - analystReport.model.over15).toFixed(4)),
       over25: analystReport.market.calibrated.over25,
@@ -1467,7 +1686,9 @@ export async function enrichEspnMatchWithFotmob(params: {
   }
 
   // 7. Mise à jour du score de vigilance avec les signaux d'effectif et d'écart marché/modèle
-  const market = espnMatch.market;
+  // Le marché de référence est désormais constitué des cotes bookmaker réelles,
+  // dont la marge a été retirée (probabilités justes).
+  const market = marketProbs;
   const reasons: string[] = [];
   let vigilanceScore = 0;
 
@@ -1710,6 +1931,7 @@ export async function enrichEspnMatchWithFotmob(params: {
     },
     factors: nextFactors,
     limitations: updatedLimitations,
+    market: marketPayload,
     fotmob: {
       matchId: matchedDayItem.id,
       coverageLevel: details.general?.coverageLevel || null,
@@ -1720,5 +1942,18 @@ export async function enrichEspnMatchWithFotmob(params: {
       referee,
       insights,
     },
+    marketSource: marketPayload
+      ? {
+          origin: marketSource.origin,
+          provider: marketProvider?.label ?? null,
+          providerKey: marketProvider?.key ?? null,
+          requested: marketProvider?.requested ?? null,
+          honored: marketProvider?.honored ?? null,
+          fetchedAt: marketFetchedAt,
+          markets: marketOdds.odds?.markets ?? [],
+          overround: marketOdds.parsed?.overround ?? null,
+          method: marketOdds.parsed?.method ?? null,
+        }
+      : null,
   };
 }
