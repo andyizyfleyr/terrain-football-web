@@ -196,7 +196,12 @@ check(
     str(table.get("10")),
 )
 
-print("4. Structures ESPN réelles (calendrier d'équipe, scoreboard de saison)")
+print("4. Année de saison ESPN")
+check("saison d'août = année de la saison", espn_module.season_year(datetime(2026, 8, 15, tzinfo=timezone.utc)) == 2026)
+check("saison de janvier = année précédente", espn_module.season_year(datetime(2027, 1, 10, tzinfo=timezone.utc)) == 2026)
+check("saison de mars = année précédente", espn_module.season_year(datetime(2026, 3, 2, tzinfo=timezone.utc)) == 2025)
+
+print("5. Structures ESPN réelles (calendrier d'équipe, scoreboard de saison)")
 
 # Fixture conforme aux réponses ESPN observées : dans le calendrier
 # d'équipe le score est un objet, dans le scoreboard c'est un scalaire.
@@ -259,7 +264,11 @@ not_completed["status"]["type"]["completed"] = False
 check("match non terminé ignoré", espn_module._parse_event(not_completed) is None)
 
 
+requested_urls = []
+
+
 async def fake_schedule_ok(client, url):
+    requested_urls.append(url)
     if "/schedule" in url:
         return {"events": [TEAM_SCHEDULE_EVENT]}
     return {"events": [SEASON_SCOREBOARD_EVENT]}
@@ -282,6 +291,11 @@ async def run_schedule(fake):
 
 
 history_direct = asyncio.run(run_schedule(fake_schedule_ok))
+check(
+    "saison explicitement demandée à ESPN",
+    any("season=2026" in url for url in requested_urls),
+    str(requested_urls),
+)
 check("calendrier d'équipe exploité", len(history_direct) == 1, str(history_direct))
 check("buts du calendrier d'équipe corrects", history_direct and history_direct[0]["homeGoals"] == 1, str(history_direct))
 

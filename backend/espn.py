@@ -240,7 +240,7 @@ async def fetch_league_season(
     if cached and now - cached["at"] < SEASON_CACHE_TTL:
         return cached["events"]
 
-    url = f"{ESPN_BASE}/site/v2/sports/soccer/{league}/scoreboard?dates={year}&limit=400"
+    url = f"{ESPN_BASE}/site/v2/sports/soccer/{league}/scoreboard?dates={year}&limit=1000"
     payload = await fetch_json(client, url)
     events: List[Dict[str, Any]] = []
     seen: set = set()
@@ -269,29 +269,55 @@ async def fetch_team_schedule(
     if not team_id:
         return []
 
-    url = f"{ESPN_BASE}/site/v2/sports/soccer/{league}/teams/{team_id}/schedule"
-    payload = await fetch_json(client, url)
+    # Sans `season`, ESPN renvoie le calendrier de la PROCHAINE saison
+    # (aucun match termine) : la forme recentielle serait vide. La
+    # saison est donc toujours explicite.
+    current_year = season_year(kickoff)
+    years = [current_year]
+    window_start = (kickoff - timedelta(days=FORM_WINDOW_DAYS)) if kickoff else None
+    if window_start and season_year(window_start) != current_year:
+        years.append(season_year(window_start))
+
     history: List[Dict[str, Any]] = []
-    for event in (payload or {}).get("events") or []:
-        parsed = _parse_event(event)
-        if parsed:
-            history.append(parsed)
+    seen: set = set()
+    for year in years:
+        url = (
+            f"{ESPN_BASE}/site/v2/sports/soccer/{league}/teams/{team_id}"
+            f"/schedule?season={year}"
+        )
+        payload = await fetch_json(client, url)
+        for event in (payload or {}).get("events") or []:
+            parsed = _parse_event(event)
+            if parsed and parsed["id"] not in seen:
+                seen.add(parsed["id"])
+                history.append(parsed)
 
     if not history:
-        years = [kickoff.year] if kickoff else [datetime.now(timezone.utc).year]
-        if kickoff and (kickoff - timedelta(days=FORM_WINDOW_DAYS)).year != kickoff.year:
-            years.append((kickoff - timedelta(days=FORM_WINDOW_DAYS)).year)
+        # Dernier recours : scoreboard de la ligue sur les annees concernees.
         season: List[Dict[str, Any]] = []
-        for year in years:
+        for year in {current_year, current_year - 1}:
             season.extend(await fetch_league_season(client, league, year))
-        history = [
-            match
-            for match in season
-            if match["homeId"] == str(team_id) or match["awayId"] == str(team_id)
-        ]
+        history = []
+        for match in season:
+            if match["id"] in seen:
+                continue
+            if match["homeId"] == str(team_id) or match["awayId"] == str(team_id):
+                seen.add(match["id"])
+                history.append(match)
 
     history.sort(key=lambda m: m.get("date") or "")
     return history
+
+
+def season_year(kickoff: Optional[datetime]) -> int:
+    """Annee de saison ESPN (saison europeenne : aout -> juillet).
+
+    `season=2026` designe la saison 2026-27 : c'est l'annee de saison
+    qu'ESPN attend, pas l'annee civile.
+    """
+    if not kickoff:
+        return datetime.now(timezone.utc).year
+    return kickoff.year if kickoff.month >= 7 else kickoff.year - 1
 
 
 def _is_home(match: Dict[str, Any], team_id: str) -> bool:
