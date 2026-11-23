@@ -32,6 +32,35 @@ Si le service d'analyse est injoignable, `/api/analyze` renvoie les matchs
 bruts avec `analysis: null`. Le front détecte alors l'absence d'analyse
 complète et calcule l'analyse de son côté : le site reste fonctionnel.
 
+### Accès ESPN : saison explicite et limitation de débit
+
+ESPN impose deux contraintes que l'ingestion doit respecter :
+
+1. **La saison doit être explicite.** Sans `?season=YYYY`, l'API renvoie le
+   calendrier de la *prochaine* saison (HTTP 200, aucun match terminé) :
+   la forme recentielle et l'historique domicile/extérieur seraient vides.
+   `season_year()` calcule l'année de saison européenne (août → juillet) et
+   le calendrier est demandé pour chaque année traversée par la fenêtre de
+   forme de 60 jours.
+
+2. **ESPN limite le débit.** Un balayage de journée demandait 2 calendriers
+   + 6 résumés de style par match, soit jusqu'à ~90 requêtes : ESPN
+   répondait alors 429 et la forme revenait vide. L'ingestion applique
+   désormais :
+
+   | Levier | Effet |
+   |---|---|
+   | Retry avec backoff (2 tentatives) sur 429/5xx/timeout | une requête échouée est rejouée au lieu de renvoyer une donnée vide |
+   | Cache TTL des calendriers par (ligue, équipe, saison) | une équipe n'est téléchargée qu'une fois |
+   | Concurrence limitée à 4 requêtes | plus de rafale, donc moins de limitation |
+   | Timeout long (30 s) pour les calendriers de saison | les réponses lourdes (~100 Ko) ont le temps d'arriver |
+   | Résumé de style réservé à la fiche du match | un balayage de journée passe de ~90 à ~22 requêtes ESPN |
+
+   Le journal des appels (`FETCH_LOG`) est capturé **après** l'appel :
+   capturé avant, il masquait les erreurs ESPN réelles.
+
+   Diagnostic : `GET /api/debug/espn?league=eng.1&team=306`
+
 ## Variables d'environnement
 
 | Variable | Défaut | Rôle |
@@ -39,12 +68,15 @@ complète et calcule l'analyse de son côté : le site reste fonctionnel.
 | `ENGINE_URL` | `https://terrain-football-web.vercel.app` | URL du service d'analyse (`/api/engine/analyze`) |
 | `ENGINE_TOKEN` | *(vide)* | Jeton Bearer exigé par le service d'analyse si défini |
 | `ESPN_TIMEOUT` | `12` | Délai de connexion ESPN (secondes) |
+| `ESPN_SLOW_TIMEOUT` | `30` | Délai des calendriers de saison (secondes) |
+| `ESPN_MAX_CONCURRENT` | `4` | Requêtes ESPN simultanées maximum |
+| `ESPN_CACHE_TTL` | `600` | Durée de vie du cache des calendriers (secondes) |
 | `ENGINE_TIMEOUT` | `120` | Délai de l'appel au moteur (secondes) |
 
 ## Tests
 
 ```bash
-python3 backend/test_ingestion.py   # 32 contrôles d'ingestion (hors réseau)
+python3 backend/test_ingestion.py   # 46 contrôles d'ingestion (hors réseau)
 python3 backend/test_api.py        # 18 contrôles de contrat et de repli
 ```
 
@@ -73,7 +105,8 @@ Python.
 
 Variables d'environnement côté API : `ENGINE_URL` (défaut :
 `https://terrain-football-web.vercel.app`), `ENGINE_TOKEN` (vide),
-`ESPN_TIMEOUT` (12), `ENGINE_TIMEOUT` (120).
+`ESPN_TIMEOUT` (12), `ESPN_SLOW_TIMEOUT` (30), `ESPN_MAX_CONCURRENT` (4),
+`ESPN_CACHE_TTL` (600), `ENGINE_TIMEOUT` (120).
 
 Côté front, `BACKEND_API_URL=https://terrain-football-api.vercel.app` est
 déjà positionné dans le projet `terrain-football-web`.
