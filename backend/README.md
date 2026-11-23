@@ -44,8 +44,56 @@ complète et calcule l'analyse de son côté : le site reste fonctionnel.
 ## Tests
 
 ```bash
-python3 backend/test_ingestion.py
+python3 backend/test_ingestion.py   # 32 contrôles d'ingestion (hors réseau)
+python3 backend/test_api.py        # 18 contrôles de contrat et de repli
 ```
 
 Les contrôles sont hors réseau : ils valident la logique de collecte
-(fenêtre de forme, splits, libellés, repli en l'absence de source).
+(fenêtre de forme, splits, libellés, repli en l'absence de source) et le
+contrat HTTP (analyse complète, repli moteur injoignable, journée vide).
+
+## Déploiement (Vercel)
+
+Le service est un projet Vercel **séparé** du front (le dépôt contient les
+deux : l'application Next.js est dans `app/`, le service Python dans
+`backend/`).
+
+| Réglage | Valeur |
+|---|---|
+| Projet Vercel | `terrain-football-api` |
+| Framework | `fastapi` |
+| Root directory | *(racine du dépôt)* |
+| Point d'entrée | `backend/main.py` — déclaré par `[tool.vercel].entrypoint` dans le `pyproject.toml` racine |
+| Dépendances | `pyproject.toml` racine (`[project].dependencies`, mêmes versions que `backend/requirements.txt`) |
+
+Le `pyproject.toml` racine est indispensable : le runtime FastAPI cherche
+le point d'entrée à la racine du projet, alors que le dossier `app/` du
+frontNext.js ne doit surtout pas être confondu avec un point d'entrée
+Python.
+
+Variables d'environnement côté API : `ENGINE_URL` (défaut :
+`https://terrain-football-web.vercel.app`), `ENGINE_TOKEN` (vide),
+`ESPN_TIMEOUT` (12), `ENGINE_TIMEOUT` (120).
+
+Côté front, `BACKEND_API_URL=https://terrain-football-api.vercel.app` est
+déjà positionné dans le projet `terrain-football-web`.
+
+### Ordre de mise en ligne
+
+1. Déployer le **front** (`terrain-football-web`) : il expose la route
+   moteur `POST /api/engine/analyze` dont le backend a besoin.
+2. Déployer ensuite l'**API** (`terrain-football-api`) : elle appelle le
+   moteur du front.
+3. Vérifier :
+   ```bash
+   curl -s "https://terrain-football-api.vercel.app/api/health"
+   curl -s "https://terrain-football-api.vercel.app/api/analyze?league=eng.1&date=20261122&match=401879234" | jq '.analysis, (.matches[0].analyst.pronostics | keys | length)'
+   ```
+   Attendu : `analysis: "complete"` et `16`.
+
+> **Quota Hobby.** Un compte Vercel Hobby est limité à 100 déploiements par
+> jour. Au-delà, Vercel répond `402 api-deployments-free-per-day` et
+> refuse toute création de déploiement (les builds déclenchés par un push
+> GitHub sont eux aussi comptés). Dans ce cas, attendre la remise à zéro
+> quotidienne ou passer sur un plan payant : le code, lui, est prêt à être
+> déployé tel quel.
