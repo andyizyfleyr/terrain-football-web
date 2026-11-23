@@ -218,6 +218,8 @@ export async function GET(request: NextRequest) {
   const format = String(searchParams.get('format') || 'json');
   const since = searchParams.get('since') || '';
   const probeMatchId = Number(searchParams.get('probeMatchId') || 0);
+  // Fournisseur de cotes à imposer (homogénéité de la série de marché).
+  const pinnedProvider = String(searchParams.get('provider') || '').trim();
 
   try {
     if (probeMatchId) {
@@ -314,8 +316,13 @@ export async function GET(request: NextRequest) {
         : [];
 
       // Cotes 1X2 : une seule requête par match (point de vente principal).
-      const oddsPayload = await getJson(`matchOdds?matchId=${match.id}&ccode3=ESP`, 8000);
-      const parsed = oddsPayload ? parseMarketOdds(oddsPayload, match.homeName, match.awayName, null) : null;
+      const oddsUrl = pinnedProvider
+        ? `matchOdds?matchId=${match.id}&ccode3=ESP&bettingProvider=${encodeURIComponent(pinnedProvider)}`
+        : `matchOdds?matchId=${match.id}&ccode3=ESP`;
+      const oddsPayload = await getJson(oddsUrl, 8000);
+      const parsed = oddsPayload
+        ? parseMarketOdds(oddsPayload, match.homeName, match.awayName, pinnedProvider || null)
+        : null;
       const odds =
         parsed && parsed.home && parsed.draw && parsed.away
           ? { home: parsed.home, draw: parsed.draw, away: parsed.away }
@@ -414,6 +421,78 @@ export async function GET(request: NextRequest) {
           withLineups: matches.filter(m => m.startersHome?.length).length,
           withAbsences: matches.filter(m => m.unavailableHome?.length || m.unavailableAway?.length).length,
         },
+      });
+    }
+
+    if (format === 'lean') {
+      const rows = matches.map(m => {
+        const referee = m.referee
+          ? [
+              Number((m.referee.yellowPerMatch ?? 0).toFixed(2)),
+              Number((m.referee.foulsPerMatch ?? 0).toFixed(2)),
+              Number((m.referee.penaltiesPerMatch ?? 0).toFixed(2)),
+            ]
+          : null;
+        const weather = m.weather
+          ? [
+              m.weather.temperature ?? null,
+              m.weather.windSpeed ?? null,
+              m.weather.precipitation ?? null,
+            ]
+          : null;
+        return [
+          m.id,
+          m.date,
+          m.homeId,
+          m.homeName,
+          m.awayId,
+          m.awayName,
+          m.homeGoals,
+          m.awayGoals,
+          m.homeXg,
+          m.awayXg,
+          m.htHome,
+          m.htAway,
+          m.homeXgot,
+          m.awayXgot,
+          m.odds ? [m.odds.home, m.odds.draw, m.odds.away] : null,
+          referee,
+          weather,
+          m.pitch?.surface ? String(m.pitch.surface) : null,
+          m.unavailableHome,
+          m.unavailableAway,
+          Boolean(m.startersHome?.length),
+          Boolean(m.startersAway?.length),
+          m.provider,
+        ];
+      });
+      return NextResponse.json({
+        format: 'lean-v1',
+        league: 'eng.1',
+        leagueId,
+        season,
+        period: dates.length ? `${dates[0]} → ${dates[dates.length - 1]}` : '',
+        counts: {
+          matches: matches.length,
+          teams: teams.length,
+          withOdds: matches.filter(m => m.odds).length,
+          withXg: matches.filter(m => m.homeXg !== null).length,
+          withHalfTime: matches.filter(m => m.htHome !== null).length,
+          withLineups: matches.filter(m => m.startersHome?.length).length,
+          withAbsences: matches.filter(m => m.unavailableHome?.length || m.unavailableAway?.length).length,
+          withReferee: matches.filter(m => m.referee).length,
+          withWeather: matches.filter(m => m.weather).length,
+          withPitch: matches.filter(m => m.pitch?.surface).length,
+        },
+        matchColumns: [
+          'id', 'date', 'homeId', 'homeName', 'awayId', 'awayName',
+          'homeGoals', 'awayGoals', 'homeXg', 'awayXg', 'htHome', 'htAway',
+          'homeXgot', 'awayXgot', 'odds', 'referee', 'weather', 'pitch',
+          'unavailableHome', 'unavailableAway', 'lineupHome', 'lineupAway', 'provider',
+        ],
+        matches: rows,
+        teamColumns: ['id', 'name'],
+        teams: teams.map(t => [t.id, t.name]),
       });
     }
 
