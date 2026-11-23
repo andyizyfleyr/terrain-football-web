@@ -10,6 +10,16 @@
  * corrects — et de les ajuster sur des mesures plutôt que sur des
  * intuition.
  *
+ * POLITIQUE DE FUITE TEMPORELLE (leakage) :
+ *   - le classement, la forme et les xG sont reconstruits-match par match à
+ *     partir des SEULEMENTS rencontres antérieures ;
+ *   - les instantanés d'équipe (totaux de saison, statistiques de joueurs)
+ *     sont EXCLUS de l'ajustement : ils sont courants au moment de la
+ *     collecte etnous donneraient un avantage rétrospectif indu ;
+ *   - les absences et les compositions CONFIRMÉES sont conservées : elles
+ *     sont connues avant le coup d'envoi (annonce des compositions) ;
+ *   - les cotes utilisées sont celles relevées avant le coup d'envoi.
+ *
  * Les métriques produites :
  *   - log-loss multi-classes (3 issues) : qualité probabiliste ;
  *   - score de Brier multi-classes ;
@@ -301,18 +311,20 @@ export function buildWalkForwardInputs(
           competition: m.league,
         }));
 
+    // Identité statique uniquement : les compteurs de saison seraient
+    // une fuite temporelle (ils incluent des matchs postérieurs).
     const squadFor = (snapshot: BacktestTeamSnapshot | undefined) =>
       (snapshot?.players || []).map(p => ({
         id: p.id,
         name: p.name,
         position: p.position,
-        rating: p.rating ?? null,
-        goals: p.goals ?? 0,
-        assists: p.assists ?? 0,
-        marketValue: p.marketValue ?? 0,
-        minutes: p.minutes ?? 0,
-        xg: p.xg ?? 0,
-        xa: p.xa ?? 0,
+        rating: null,
+        goals: 0,
+        assists: 0,
+        marketValue: 0,
+        minutes: 0,
+        xg: 0,
+        xa: 0,
       }));
 
     const absencesFor = (ids: number[], snapshot: BacktestTeamSnapshot | undefined) =>
@@ -324,10 +336,10 @@ export function buildWalkForwardInputs(
             name: player?.name || `Joueur #${id}`,
             type: 'injury',
             position: player?.position,
-            marketValue: player?.marketValue ?? 0,
-            rating: player?.rating ?? null,
-            goals: player?.goals ?? 0,
-            assists: player?.assists ?? 0,
+            marketValue: 0,
+            rating: null,
+            goals: 0,
+            assists: 0,
           };
         })
         .filter(a => a.id);
@@ -341,19 +353,19 @@ export function buildWalkForwardInputs(
           return {
             id,
             name: player?.name || `Joueur #${id}`,
-            marketValue: player?.marketValue,
-            rating: player?.rating ?? null,
+            marketValue: 0,
+            rating: null,
             position: player?.position,
           };
         }),
       };
     };
 
-    const statsFor = (snapshot: BacktestTeamSnapshot | undefined, aggregate: TeamAggregate) => {
+    // Les statistiques d'instantané (totaux de saison au moment de la
+    // collecte) sont volontairement écartées : elles incluent des matchs
+    // joués APRÈS la rencontre prédite.
+    const statsFor = (aggregate: TeamAggregate) => {
       const stats: Record<string, { value: number; format?: string; perMatch?: number }> = {};
-      for (const [key, value] of Object.entries(snapshot?.stats || {})) {
-        stats[key] = { value, format: 'fraction', perMatch: value };
-      }
       if (aggregate.played > 0) {
         stats.expected_goals_team = {
           value: aggregate.xg / aggregate.played,
@@ -393,7 +405,7 @@ export function buildWalkForwardInputs(
         tableAway: rowsAway.find(r => r.id === match.homeId) ?? null,
         xgRow: rowsAll.find(r => r.id === match.homeId) ?? null,
         recentMatches: recentFor(match.homeId),
-        stats: statsFor(homeSnapshot, homeAgg),
+        stats: statsFor(homeAgg),
         squad: squadFor(homeSnapshot),
         absences: absencesFor(match.unavailableHome, homeSnapshot),
         lineup: lineupFor(match.startersHome, homeSnapshot),
@@ -408,7 +420,7 @@ export function buildWalkForwardInputs(
         tableAway: rowsAway.find(r => r.id === match.awayId) ?? null,
         xgRow: rowsAll.find(r => r.id === match.awayId) ?? null,
         recentMatches: recentFor(match.awayId),
-        stats: statsFor(awaySnapshot, awayAgg),
+        stats: statsFor(awayAgg),
         squad: squadFor(awaySnapshot),
         absences: absencesFor(match.unavailableAway, awaySnapshot),
         lineup: lineupFor(match.startersAway, awaySnapshot),
@@ -624,6 +636,9 @@ export function evaluateSamples(
   }
   notes.push(
     `Log-loss : modèle pur ${metrics.modelLogLoss} · calibré ${metrics.calibratedLogLoss} · marché ${metrics.marketLogLoss ?? '—'} · naïf ${metrics.naiveLogLoss}.`
+  );
+  notes.push(
+    'Ajustement sans fuite temporelle : seuls les cumuls antérieurs, les absences et les compositions confirmées sont utilisés ; les totaux de saison collectés après coup sont exclus.'
   );
   if (metrics.calibratedLogLoss > metrics.naiveLogLoss) {
     notes.push(

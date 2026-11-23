@@ -179,6 +179,8 @@ export async function GET(request: NextRequest) {
   const leagueId = Number(searchParams.get('leagueId') || 47);
   const season = searchParams.get('season') || '2026/2027';
   const limit = Math.min(150, Math.max(5, Number(searchParams.get('limit') || 60)));
+  const offset = Math.max(0, Number(searchParams.get('offset') || 0));
+  const format = String(searchParams.get('format') || 'json');
   const since = searchParams.get('since') || '';
 
   try {
@@ -207,7 +209,9 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => a.utcTime.localeCompare(b.utcTime));
 
     const filtered = since ? rawMatches.filter(m => m.utcTime.slice(0, 10) >= since) : rawMatches;
-    const selected = filtered.slice(-limit);
+    const end = Math.max(0, filtered.length - offset);
+    const start = Math.max(0, end - limit);
+    const selected = filtered.slice(start, end);
 
     // --- Détails + cotes (concurrence bornée) --------------------------
     const enriched = await pool(selected, 6, async match => {
@@ -322,6 +326,47 @@ export async function GET(request: NextRequest) {
     }
 
     const dates = matches.map(m => m.date).sort();
+
+    if (format === 'packed') {
+      return NextResponse.json({
+        format: 'packed-v1',
+        league: 'eng.1',
+        leagueId,
+        season,
+        period: dates.length ? `${dates[0]} → ${dates[dates.length - 1]}` : '',
+        counts: {
+          matches: matches.length,
+          teams: teams.length,
+          withOdds: matches.filter(m => m.odds).length,
+          withXg: matches.filter(m => m.homeXg !== null).length,
+          withHalfTime: matches.filter(m => m.htHome !== null).length,
+          withLineups: matches.filter(m => m.startersHome?.length).length,
+        },
+        matchColumns: [
+          'id', 'date', 'homeId', 'homeName', 'awayId', 'awayName',
+          'homeGoals', 'awayGoals', 'homeXg', 'awayXg', 'htHome', 'htAway',
+          'homeShots', 'awayShots', 'homeXgot', 'awayXgot',
+          'odds', 'provider',
+          'unavailableHome', 'unavailableAway', 'startersHome', 'startersAway',
+          'referee', 'weather', 'pitch',
+        ],
+        matches: matches.map(m => [
+          m.id, m.date, m.homeId, m.homeName, m.awayId, m.awayName,
+          m.homeGoals, m.awayGoals, m.homeXg, m.awayXg, m.htHome, m.htAway,
+          m.homeShots, m.awayShots, m.homeXgot, m.awayXgot,
+          m.odds ? [m.odds.home, m.odds.draw, m.odds.away] : null, m.provider,
+          m.unavailableHome, m.unavailableAway, m.startersHome, m.startersAway,
+          m.referee, m.weather, m.pitch,
+        ]),
+        teamColumns: ['id', 'name', 'players'],
+        teams: teams.map(t => [
+          t.id,
+          t.name,
+          (t.players || []).map(p => [p.id, p.name, p.position ?? null]),
+        ]),
+      });
+    }
+
     return NextResponse.json({
       league: 'eng.1',
       leagueId,
