@@ -113,6 +113,44 @@ async def health() -> JSONResponse:
     )
 
 
+@app.get("/api/debug/espn")
+async def debug_espn(league: str = "eng.1", team: str = "306") -> JSONResponse:
+    """Diagnostic temporaire de l'accès ESPN (statut, taille, structure)."""
+    from espn import ESPN_BASE, _client
+
+    report = {}
+    async with _client() as client:
+        for label, url in (
+            ("schedule", f"{ESPN_BASE}/site/v2/sports/soccer/{league}/teams/{team}/schedule"),
+            ("scoreboard", f"{ESPN_BASE}/site/v2/sports/soccer/{league}/scoreboard?dates=20261122"),
+            ("standings", f"{ESPN_BASE}/v2/sports/soccer/{league}/standings"),
+        ):
+            entry = {"url": url}
+            try:
+                response = await client.get(url)
+                entry["status"] = response.status_code
+                entry["bytes"] = len(response.content)
+                if response.status_code == 200:
+                    payload = response.json()
+                    entry["keys"] = sorted(list(payload.keys())[:12])
+                    events = payload.get("events") or []
+                    entry["events"] = len(events)
+                    completed = [
+                        e for e in events
+                        if ((e.get("status") or {}).get("type") or {}).get("completed")
+                    ]
+                    entry["completed"] = len(completed)
+                    if completed:
+                        comps = (completed[0].get("competitions") or [{}])[0]
+                        first = (comps.get("competitors") or [{}])[0]
+                        entry["sample_score"] = first.get("score")
+                        entry["sample_date"] = completed[0].get("date")
+            except Exception as exc:  # pragma: no cover - diagnostic
+                entry["error"] = f"{type(exc).__name__}: {exc}"
+            report[label] = entry
+    return JSONResponse(report)
+
+
 @app.get("/api/meta")
 async def meta() -> JSONResponse:
     """Contrat de l'API : role de chaque couche."""
