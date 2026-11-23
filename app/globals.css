@@ -586,3 +586,42 @@
 @media(max-width:430px){
   .pronosticsBlock .periodRows{grid-template-columns:1fr}
 }
+
+/* ------------------------------------------------------------------ */
+/* RAPPORT ANALYSTE IA — VERSION IMPRIMABLE                            */
+/* ------------------------------------------------------------------ */
+/* Barre d'action (écran) : le rapport se lit à l'écran mais doit aussi
+   pouvoir être imprimé ou exporté en PDF — le bloc « pronostics dérivés »
+   y figure au même titre que les autres modules. */
+.printToolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;padding:9px 11px;border:1px solid #e3ebe5;border-radius:10px;background:#f8fbf9}
+.printToolbarHint{color:#8b978f;font-size:9px;line-height:1.4}
+.printButton{padding:7px 13px;border:1px solid #cfe2d5;border-radius:8px;background:#eef7f1;color:#2c6b45;font:600 10px 'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;transition:all .15s}
+.printButton:hover{background:#e2f1e7;border-color:#b6d6c1}
+.printHeader{display:none}
+
+@media print{
+  @page{margin:12mm}
+  html,body{background:#fff!important;color:#111!important}
+  /* Chrome de l'application : masquée à l'impression. */
+  .appHero,.toolbar,.statusTabsBar,.analysisTabs,.analysisTopline,.matchHero,.appFooter,.appHeader,.backLinkButton,.navLinkButton,.navCurrent,.printToolbar,.bottomSheetBackdrop,.bottomSheetSheet,.analysisLoading,.vigilancePage,.modelMark{display:none!important}
+  .printHeader{display:block!important;margin:0 0 14px;padding:0 0 10px;border-bottom:2px solid #222}
+  .printHeader h2{margin:5px 0 4px;font-size:19px;letter-spacing:-.4px}
+  .printHeader p{margin:0;color:#333;font-size:10px;line-height:1.5}
+  .printHeader small{display:block;margin-top:5px;color:#555;font-size:8px;line-height:1.5}
+  .matchPageBody{max-width:none;margin:0;padding:0}
+  .analysisPanel{border:0!important;box-shadow:none!important;min-height:0!important}
+  .analystArea{padding:0}
+  /* Un module ne doit pas être coupé par un saut de page. */
+  .analystBlock,.analystVerdict,.predictionCard,.analystSimCard,.analystSimGrid,.analystEdgeTable,.analystMiniTable,.analystContextBox,.analystScenarios,.analystScoreChips,.periodGroup,.analystTwoCol,.analystConfidence,.squadQuickBanner,.fotmobInsightsBox,.dataWarning,.legalNote{break-inside:avoid;page-break-inside:avoid}
+  h1,h2,h3,.subsectionHeading h3{break-after:avoid;page-break-after:avoid}
+  .analystVerdict{border:1px solid #999!important;background:#fff!important}
+  /* Barres de probabilité : lisibles en noir et blanc. */
+  .probTrack,.analystScenarioTrack,.analystGauge{background:#fff!important;border:1px solid #bbb!important;overflow:hidden}
+  .probTrack i,.analystScenarioTrack i,.analystGauge i{background:#3f4a44!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .predictionGrid{grid-template-columns:repeat(2,minmax(0,1fr))!important;padding:0 0 10px}
+  .predictionCard{border:1px solid #bbb!important;box-shadow:none!important;background:#fff!important}
+  .probLabel,.probNote,.tableNote,.subsectionHeading p,.analystBullets li,.analystVerdictText{color:#333!important}
+  .sectionKicker{color:#000!important}
+  .analystArea a[href]:after{content:''}
+  .openFullPageLink:after{content:' (' attr(href) ')';font-size:8px;color:#555}
+}

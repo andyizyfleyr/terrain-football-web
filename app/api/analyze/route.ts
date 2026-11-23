@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { enrichEspnMatchWithFotmob } from '../../lib/fotmob';
+import {
+  analysisSources,
+  enrichMatches,
+  hasCompleteAnalysis,
+} from '../../lib/analysisService';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -102,28 +106,28 @@ export async function GET(request: NextRequest) {
     // pour garantir une réponse rapide tout en conservant blessés/suspendus, arbitre, H2H et table xG de la ligue.
     const isSingleMatch = Boolean(matchId) || rawMatches.length === 1;
 
-    const enrichedMatches = await Promise.all(
-      rawMatches.map(async m => {
-        try {
-          const enriched = await enrichEspnMatchWithFotmob({
-            espnMatch: m,
-            leagueSlug: league,
-            compactDate: date || String(m?.date || '').slice(0, 10).replaceAll('-', ''),
-            deepTeamFetch: isSingleMatch,
-          });
-          return sanitizeMatchStrings(enriched);
-        } catch {
-          return sanitizeMatchStrings(m);
-        }
-      })
-    );
+    // Le backend sait désormais renvoyer l'analyse COMPLÈTE (moteur v3 +
+    // marchés dérivés) : on ne recalcule alors rien localement, la réponse
+    // amont fait foi. Sinon on enrichit ici (repli historique, et chemin
+    // utilisé tant que le backend n'est pas encore à jour).
+    if (hasCompleteAnalysis(rawMatches)) {
+      return NextResponse.json({
+        ...basePayload,
+        matches: rawMatches.map(sanitizeMatchStrings),
+        sources: analysisSources(rawMatches.some(m => Boolean(m?.fotmob))),
+      });
+    }
 
-    const anyFotmob = enrichedMatches.some(m => Boolean(m?.fotmob));
+    const { matches: enrichedMatches } = await enrichMatches(rawMatches, {
+      leagueSlug: league,
+      compactDate: date || String(rawMatches[0]?.date || '').slice(0, 10).replaceAll('-', ''),
+      deepTeamFetch: isSingleMatch,
+    });
 
     return NextResponse.json({
       ...basePayload,
-      matches: enrichedMatches,
-      sources: anyFotmob ? ['Données publiques', 'Statistiques détaillées'] : ['Données publiques'],
+      matches: enrichedMatches.map(sanitizeMatchStrings),
+      sources: analysisSources(enrichedMatches.some(m => Boolean(m?.fotmob))),
     });
   } catch {
     return NextResponse.json(

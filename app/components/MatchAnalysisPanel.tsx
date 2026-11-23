@@ -771,7 +771,9 @@ export function MatchAnalysisPanel({
 
           {analysis && tab === 'pronostics' && <PronosticsPanel analyst={analyst} />}
 
-          {analysis && tab === 'analyste' && <AnalystReportView analyst={analyst} />}
+          {analysis && tab === 'analyste' && (
+            <AnalystReportView analyst={analyst} meta={{ leagueName, leagueSlug }} />
+          )}
 
           {analysis && tab === 'vigilance' && (
             <div className="vigilancePage">

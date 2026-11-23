@@ -37,7 +37,18 @@ export function pronosticsMarketCount(p: any): number {
  * donc cohérents entre eux et avec le score prédit. Aucune estimation
  * supplémentaire n'est fabriquée après coup.
  */
-export function PronosticsPanel({ analyst }: { analyst: any }) {
+export function PronosticsPanel({
+  analyst,
+  hideHeading = false,
+}: {
+  analyst: any;
+  /**
+   * Masque le titre interne du bloc. Utilisé quand le panneau est
+   * intégré dans un document qui fournit déjà son propre titre
+   * (rapport Analyst IA, version imprimable).
+   */
+  hideHeading?: boolean;
+}) {
   const p = analyst?.pronostics;
   if (!p) return null;
 
@@ -78,15 +89,17 @@ export function PronosticsPanel({ analyst }: { analyst: any }) {
 
   return (
     <div className="pronosticsBlock">
-      <div className="subsectionHeading">
-        <span className="sectionKicker">PRONOSTICS DÉRIVÉS · MOTEUR V3</span>
-        <h3>Totaux, mi-temps, premier et dernier but</h3>
-        <p>
-          {pronosticsMarketCount(p)} marchés, tous lus dans la simulation minute par minute (10 000
-          itérations) qui produit le score final. Un but compté « premier » est le même but que celui
-          compté « dernier » ou celui du score à la mi-temps.
-        </p>
-      </div>
+      {!hideHeading ? (
+        <div className="subsectionHeading">
+          <span className="sectionKicker">PRONOSTICS DÉRIVÉS · MOTEUR V3</span>
+          <h3>Totaux, mi-temps, premier et dernier but</h3>
+          <p>
+            {pronosticsMarketCount(p)} marchés, tous lus dans la simulation minute par minute (10 000
+            itérations) qui produit le score final. Un but compté « premier » est le même but que celui
+            compté « dernier » ou celui du score à la mi-temps.
+          </p>
+        </div>
+      ) : null}
 
       <div className="predictionGrid">
         {/* ---------------- Total pair / impair ---------------- */}
