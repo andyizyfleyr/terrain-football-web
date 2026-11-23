@@ -37,7 +37,7 @@ export default function Home() {
   const [leagues, setLeagues] = useState<League[]>(cachedLeagues || []);
   const [league, setLeague] = useState('eng.1');
   const [month, setMonth] = useState(() => todayKey().slice(0, 7));
-  const [statusTab, setStatusTab] = useState<StatusTab>('all');
+  const [statusTab, setStatusTab] = useState<StatusTab>('upcoming');
   const [search, setSearch] = useState('');
   const [lastMatchId, setLastMatchId] = useState('');
 
@@ -65,9 +65,11 @@ export default function Home() {
     const nextLeague = urlLeague || snapshot?.league || 'eng.1';
     const nextMonth = urlMonth || snapshot?.month || todayKey().slice(0, 7);
     const nextStatus: StatusTab =
-      urlStatus && ['all', 'upcoming', 'finished'].includes(urlStatus)
+      urlStatus && ['upcoming', 'finished'].includes(urlStatus)
         ? urlStatus
-        : snapshot?.statusTab || 'all';
+        : snapshot?.statusTab && ['upcoming', 'finished'].includes(snapshot.statusTab)
+        ? snapshot.statusTab
+        : 'upcoming';
     const nextSearch = urlSearch !== null ? urlSearch : snapshot?.search || '';
 
     setLeague(nextLeague);
@@ -119,7 +121,7 @@ export default function Home() {
     const params = new URLSearchParams();
     params.set('league', league);
     params.set('month', month);
-    if (statusTab !== 'all') params.set('status', statusTab);
+    if (statusTab !== 'upcoming') params.set('status', statusTab);
     if (search.trim()) params.set('q', search.trim());
     const nextUrl = `/?${params.toString()}`;
     if (`${window.location.pathname}${window.location.search}` !== nextUrl) {
@@ -215,7 +217,6 @@ export default function Home() {
       else upcomingCount += 1;
     }
     return {
-      all: monthFixtures.length,
       upcoming: upcomingCount,
       finished: finishedCount,
     };
@@ -515,18 +516,8 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Onglets (Tabs) : Tous / À venir / Terminés */}
+        {/* Onglets (Tabs) : À venir (par défaut) / Terminés */}
         <div className="statusTabsBar" role="tablist" aria-label="Statut des rencontres">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={statusTab === 'all'}
-            className={`statusTabButton ${statusTab === 'all' ? 'statusTabActive' : ''}`}
-            onClick={() => setStatusTab('all')}
-          >
-            <span>Tous</span>
-            <b>{counts.all}</b>
-          </button>
           <button
             type="button"
             role="tab"
@@ -613,9 +604,7 @@ export default function Home() {
                     ? `Aucune rencontre ne correspond à « ${search} »`
                     : statusTab === 'upcoming'
                     ? 'Aucun match à venir sur ce mois'
-                    : statusTab === 'finished'
-                    ? 'Aucun match terminé sur ce mois'
-                    : 'Aucune rencontre à afficher'}
+                    : 'Aucun match terminé sur ce mois'}
                 </b>
                 <span>Essayez de changer d’onglet ou de modifier votre recherche.</span>
               </div>
