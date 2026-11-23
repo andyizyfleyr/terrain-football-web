@@ -7,6 +7,17 @@
 // - Historique multi-saisons des confrontations directes (H2H)
 // - Météo & insights FotMob/Opta
 
+import {
+  AnalystInput,
+  AnalystLineup,
+  AnalystRecentMatch,
+  AnalystSquadMember,
+  AnalystStatEntry,
+  AnalystTableRow,
+  AnalystTeamInput,
+  runQuantitativeAnalyst,
+} from './analystEngine';
+
 const FOTMOB_BASE = 'https://www.fotmob.com/api/data';
 const FOTMOB_HEADERS: Record<string, string> = {
   'User-Agent':
@@ -830,6 +841,423 @@ function extractH2H(h2hRoot: any, homeTeamId: number, awayTeamId: number, homeTe
   };
 }
 
+/* ================================================================== */
+/* ANALYSE QUANTITATIVE v2 — extraction & assemblage                  */
+/* ================================================================== */
+
+/** Statistiques d'équipe dont la valeur brute est un cumul de saison */
+const TEAM_STAT_SEASON_TOTALS = new Set([
+  'expected_goals_team',
+  'expected_goals_conceded_team',
+  '_xg_diff_team',
+  'penalty_won_team',
+  'penalty_conceded_team',
+  'big_chance_team',
+  'big_chance_missed_team',
+  'touches_in_opp_box_team',
+  'corner_taken_team',
+  '_set_piece_goals_team',
+  '_set_piece_goals_conceded_team',
+]);
+
+function toAnalystTableRow(raw: any): AnalystTableRow | null {
+  if (!raw || !raw.id) return null;
+  const played = Number(raw.played || 0);
+  const scores = String(raw.scoresStr || '')
+    .split('-')
+    .map(v => Number(String(v).trim()));
+  const goalsScored =
+    typeof raw.goalsScored === 'number' ? raw.goalsScored : Number.isFinite(scores[0]) ? scores[0] : 0;
+  const goalsConceded =
+    typeof raw.goalsConceded === 'number'
+      ? raw.goalsConceded
+      : Number.isFinite(scores[1])
+      ? scores[1]
+      : 0;
+
+  return {
+    id: Number(raw.id),
+    name: String(raw.name || ''),
+    played,
+    pts: Number(raw.pts || 0),
+    idx: Number(raw.idx || 0),
+    goalsScored,
+    goalsConceded,
+    xg: typeof raw.xg === 'number' ? raw.xg : undefined,
+    xgConceded: typeof raw.xgConceded === 'number' ? raw.xgConceded : undefined,
+    xPoints: typeof raw.xPoints === 'number' ? raw.xPoints : undefined,
+    xgDiff: typeof raw.xgDiff === 'number' ? raw.xgDiff : undefined,
+  };
+}
+
+type LeagueContext = {
+  rowsAll: AnalystTableRow[];
+  rowsHome: AnalystTableRow[];
+  rowsAway: AnalystTableRow[];
+  xgRows: AnalystTableRow[];
+  legend: { title: string; indices: number[] }[];
+  tableAll: AnalystTableRow | null;
+  tableHome: AnalystTableRow | null;
+  tableAway: AnalystTableRow | null;
+  xgRow: AnalystTableRow | null;
+};
+
+function extractLeagueContext(teamPayload: any, teamId: number): LeagueContext {
+  const empty: LeagueContext = {
+    rowsAll: [],
+    rowsHome: [],
+    rowsAway: [],
+    xgRows: [],
+    legend: [],
+    tableAll: null,
+    tableHome: null,
+    tableAway: null,
+    xgRow: null,
+  };
+  if (!teamPayload) return empty;
+
+  const primaryLeagueId = Number(teamPayload?.details?.primaryLeagueId || 0);
+  const tables: any[] = Array.isArray(teamPayload?.table) ? teamPayload.table : [];
+  if (!tables.length && Array.isArray(teamPayload?.overview?.table)) {
+    tables.push(...teamPayload.overview.table);
+  }
+  if (!tables.length) return empty;
+
+  let entry =
+    tables.find(t => Number(t?.data?.leagueId) === primaryLeagueId && primaryLeagueId) || tables[0];
+  let data = entry?.data || entry || {};
+  if (!data?.table) {
+    const alt = tables.find(t => t?.data?.table);
+    data = alt?.data || alt || {};
+  }
+
+  const table = data?.table || {};
+  const rowsAll = (Array.isArray(table.all) ? table.all : [])
+    .map(toAnalystTableRow)
+    .filter((r): r is AnalystTableRow => Boolean(r));
+  const rowsHome = (Array.isArray(table.home) ? table.home : [])
+    .map(toAnalystTableRow)
+    .filter((r): r is AnalystTableRow => Boolean(r));
+  const rowsAway = (Array.isArray(table.away) ? table.away : [])
+    .map(toAnalystTableRow)
+    .filter((r): r is AnalystTableRow => Boolean(r));
+  const xgRows = (Array.isArray(table.xg) ? table.xg : [])
+    .map(toAnalystTableRow)
+    .filter((r): r is AnalystTableRow => Boolean(r));
+
+  const legend = (Array.isArray(data?.legend) ? data.legend : [])
+    .map((z: any) => ({ title: String(z?.title || ''), indices: Array.isArray(z?.indices) ? z.indices : [] }))
+    .filter((z: any) => z.indices.length);
+
+  const findRow = (rows: AnalystTableRow[]) => rows.find(r => r.id === teamId) || null;
+
+  return {
+    rowsAll,
+    rowsHome,
+    rowsAway,
+    xgRows,
+    legend,
+    tableAll: findRow(rowsAll),
+    tableHome: findRow(rowsHome),
+    tableAway: findRow(rowsAway),
+    xgRow: xgRows.find(r => r.id === teamId) || null,
+  };
+}
+
+function extractTeamStatEntries(
+  teamPayload: any,
+  played: number
+): { stats: Record<string, AnalystStatEntry>; playerStats: Record<string, any> } {
+  const stats: Record<string, AnalystStatEntry> = {};
+  const playerStats: Record<string, any> = {};
+
+  const teams = teamPayload?.stats?.teams;
+  if (Array.isArray(teams)) {
+    for (const entry of teams) {
+      const key = typeof entry?.stat === 'string' ? entry.stat : entry?.stat?.name;
+      const participant = entry?.participant;
+      if (!key || !participant) continue;
+      const value = Number(participant.value);
+      if (!Number.isFinite(value)) continue;
+      const format = entry?.stat?.format || participant?.stat?.format || 'fraction';
+      const perMatch = TEAM_STAT_SEASON_TOTALS.has(key) && played > 0 ? value / played : value;
+      stats[key] = { value, format, perMatch };
+    }
+  }
+
+  const players = teamPayload?.stats?.players;
+  if (Array.isArray(players)) {
+    for (const entry of players) {
+      const key = typeof entry?.name === 'string' ? entry.name : entry?.stat?.name;
+      const participant = entry?.participant;
+      if (!key || !participant) continue;
+      const value = Number(participant.value);
+      if (!Number.isFinite(value)) continue;
+      playerStats[key] = {
+        value,
+        name: String(participant.name || ''),
+        stat: participant.stat || null,
+      };
+    }
+  }
+
+  return { stats, playerStats };
+}
+
+function extractSquadMembers(teamPayload: any): AnalystSquadMember[] {
+  const out: AnalystSquadMember[] = [];
+  const groups = teamPayload?.squad?.squad;
+  if (!Array.isArray(groups)) return out;
+
+  for (const group of groups) {
+    const members = Array.isArray(group?.members) ? group.members : [];
+    for (const m of members) {
+      if (!m?.id) continue;
+      out.push({
+        id: Number(m.id),
+        name: String(m.name || ''),
+        position: m.positionIdsDesc ? String(m.positionIdsDesc).split(',')[0] : undefined,
+        rating: typeof m.rating === 'number' ? m.rating : null,
+        goals: typeof m.goals === 'number' ? m.goals : undefined,
+        assists: typeof m.assists === 'number' ? m.assists : undefined,
+        marketValue: typeof m.transferValue === 'number' ? m.transferValue : undefined,
+        excludeFromRanking: typeof m.excludeFromRanking === 'boolean' ? m.excludeFromRanking : undefined,
+        injured: Boolean(m.injured),
+        expectedReturn: m.injury?.expectedReturn ? String(m.injury.expectedReturn) : undefined,
+      });
+    }
+  }
+  return out;
+}
+
+function findFixturesArray(payload: any): any[] {
+  const candidates = [
+    payload?.fixtures?.allFixtures?.fixtures,
+    payload?.overview?.fixtures?.allFixtures?.fixtures,
+    payload?.fixtures?.fixtures,
+    payload?.overview?.fixtures?.fixtures,
+  ];
+  for (const c of candidates) {
+    if (Array.isArray(c) && c.length) return c;
+  }
+  // Recherche récursive de secours
+  const seen = new Set<any>();
+  const walk = (node: any, depth: number): any[] | null => {
+    if (!node || typeof node !== 'object' || depth > 5 || seen.has(node)) return null;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      const hit = node.find(item => item && typeof item === 'object' && item.status?.utcTime && item.tournament);
+      return hit ? node : null;
+    }
+    for (const key of Object.keys(node)) {
+      const found = walk(node[key], depth + 1);
+      if (found) return found;
+    }
+    return null;
+  };
+  return walk(payload, 0) || [];
+}
+
+function extractTeamFixtures(teamPayload: any): AnalystRecentMatch[] {
+  const list = findFixturesArray(teamPayload);
+  const out: AnalystRecentMatch[] = [];
+  if (!Array.isArray(list)) return out;
+
+  for (const f of list) {
+    const utcTime = f?.status?.utcTime;
+    if (!utcTime) continue;
+    const scoreStr = String(f?.status?.scoreStr || '');
+    const parts = scoreStr.split('-').map(v => Number(String(v).trim()));
+    const homeScore = Number.isFinite(f?.home?.score) && f?.home?.score !== null ? Number(f.home.score) : Number.isFinite(parts[0]) ? parts[0] : 0;
+    const awayScore = Number.isFinite(f?.away?.score) && f?.away?.score !== null ? Number(f.away.score) : Number.isFinite(parts[1]) ? parts[1] : 0;
+
+    out.push({
+      utcTime: String(utcTime),
+      homeId: Number(f?.home?.id || 0),
+      awayId: Number(f?.away?.id || 0),
+      homeName: String(f?.home?.name || ''),
+      awayName: String(f?.away?.name || ''),
+      homeScore,
+      awayScore,
+      competition: f?.tournament?.name ? String(f.tournament.name) : undefined,
+    });
+  }
+  return out;
+}
+
+function extractTeamFormMatches(teamPayload: any, teamId: number): AnalystRecentMatch[] {
+  const out: AnalystRecentMatch[] = [];
+  const tables: any[] = Array.isArray(teamPayload?.table) ? teamPayload.table : [];
+  if (Array.isArray(teamPayload?.overview?.table)) tables.push(...teamPayload.overview.table);
+
+  for (const entry of tables) {
+    const teamForm = entry?.teamForm || entry?.data?.teamForm;
+    if (!teamForm || typeof teamForm !== 'object') continue;
+    const list = Array.isArray(teamForm[String(teamId)]) ? teamForm[String(teamId)] : [];
+    for (const item of list) {
+      const tt = item?.tooltipText;
+      if (!tt?.utcTime) continue;
+      out.push({
+        utcTime: String(tt.utcTime),
+        homeId: Number(tt.homeTeamId || 0),
+        awayId: Number(tt.awayTeamId || 0),
+        homeName: String(tt.homeTeam || ''),
+        awayName: String(tt.awayTeam || ''),
+        homeScore: Number(tt.homeScore || 0),
+        awayScore: Number(tt.awayScore || 0),
+        competition: undefined,
+      });
+    }
+    if (out.length) break;
+  }
+  return out;
+}
+
+function extractLineupTeam(lineupTeam: any): AnalystLineup | null {
+  if (!lineupTeam) return null;
+  const starters = Array.isArray(lineupTeam?.starters) ? lineupTeam.starters : [];
+  if (!starters.length) return null;
+  return {
+    formation: lineupTeam?.formation ? String(lineupTeam.formation) : null,
+    starters: starters.map((p: any) => ({
+      id: Number(p?.id || 0),
+      name: String(p?.name || ''),
+      marketValue: typeof p?.marketValue === 'number' ? p.marketValue : undefined,
+      rating: typeof p?.performance?.rating === 'number' ? p.performance.rating : typeof p?.rating === 'number' ? p.rating : null,
+      position: p?.positionId !== undefined ? String(p.positionId) : undefined,
+    })),
+  };
+}
+
+function buildAnalystTeamInput(params: {
+  teamPayload: any;
+  teamId: number;
+  teamName: string;
+  league: LeagueContext;
+  absences: UnavailablePlayerInfo[];
+  lineupTeam: any;
+  formation?: string | null;
+  kickoffIso: string;
+}): AnalystTeamInput {
+  const { teamPayload, teamId, teamName, league, absences, lineupTeam, formation } = params;
+
+  const played = league.tableAll?.played || league.xgRow?.played || 1;
+  const { stats, playerStats } = extractTeamStatEntries(teamPayload, played);
+  const squad = extractSquadMembers(teamPayload);
+
+  let recentMatches = extractTeamFixtures(teamPayload).filter(
+    m => m.homeId === teamId || m.awayId === teamId
+  );
+  if (recentMatches.length < 5) {
+    const form = extractTeamFormMatches(teamPayload, teamId);
+    if (form.length > recentMatches.length) recentMatches = form;
+  }
+
+  const squadById = new Map<number, AnalystSquadMember>();
+  for (const m of squad) squadById.set(m.id, m);
+
+  const absencesMapped = absences.map(a => {
+    const member = squadById.get(a.id);
+    return {
+      id: a.id,
+      name: a.name,
+      type: a.type,
+      position: a.position || member?.position,
+      marketValue: a.marketValue ?? member?.marketValue,
+      rating: a.rating ?? member?.rating ?? null,
+      goals: a.goals ?? member?.goals,
+      assists: a.assists ?? member?.assists,
+      isKeyPlayer: a.isKeyPlayer,
+      excludeFromRanking: member?.excludeFromRanking,
+      expectedReturn: member?.expectedReturn,
+    };
+  });
+
+  return {
+    teamId,
+    name: teamName,
+    tableAll: league.tableAll,
+    tableHome: league.tableHome,
+    tableAway: league.tableAway,
+    xgRow: league.xgRow,
+    recentMatches,
+    stats,
+    squad,
+    absences: absencesMapped,
+    lineup: extractLineupTeam(lineupTeam),
+    formation: formation || null,
+    playerStats,
+  } as AnalystTeamInput;
+}
+
+export function buildAnalystReportV2(params: {
+  homeTeamPayload: any;
+  awayTeamPayload: any;
+  homeTeamId: number;
+  awayTeamId: number;
+  homeName: string;
+  awayName: string;
+  kickoffIso: string;
+  matchId: string;
+  baseLambdas: { home: number; away: number };
+  market?: any;
+  referee?: any;
+  weather?: any;
+  h2h?: { count: number; homeGoalsAvg: number; awayGoalsAvg: number } | null;
+  homeAbsences: UnavailablePlayerInfo[];
+  awayAbsences: UnavailablePlayerInfo[];
+  homeLineup: any;
+  awayLineup: any;
+  homeFormation?: string | null;
+  awayFormation?: string | null;
+}) {
+  const homeLeague = extractLeagueContext(params.homeTeamPayload, params.homeTeamId);
+  const awayLeague = extractLeagueContext(params.awayTeamPayload, params.awayTeamId);
+
+  const homeTeam = buildAnalystTeamInput({
+    teamPayload: params.homeTeamPayload,
+    teamId: params.homeTeamId,
+    teamName: params.homeName,
+    league: homeLeague,
+    absences: params.homeAbsences,
+    lineupTeam: params.homeLineup,
+    formation: params.homeFormation,
+    kickoffIso: params.kickoffIso,
+  });
+
+  const awayTeam = buildAnalystTeamInput({
+    teamPayload: params.awayTeamPayload,
+    teamId: params.awayTeamId,
+    teamName: params.awayName,
+    league: awayLeague,
+    absences: params.awayAbsences,
+    lineupTeam: params.awayLineup,
+    formation: params.awayFormation,
+    kickoffIso: params.kickoffIso,
+  });
+
+  const input: AnalystInput = {
+    matchId: params.matchId,
+    kickoffIso: params.kickoffIso,
+    baseLambdas: params.baseLambdas,
+    market: params.market,
+    referee: params.referee,
+    weather: params.weather,
+    h2h: params.h2h,
+    league: {
+      rowsAll: homeLeague.rowsAll.length ? homeLeague.rowsAll : awayLeague.rowsAll,
+      rowsHome: homeLeague.rowsHome.length ? homeLeague.rowsHome : awayLeague.rowsHome,
+      rowsAway: homeLeague.rowsAway.length ? homeLeague.rowsAway : awayLeague.rowsAway,
+      xgRows: homeLeague.xgRows.length ? homeLeague.xgRows : awayLeague.xgRows,
+      legend: homeLeague.legend.length ? homeLeague.legend : awayLeague.legend,
+    },
+    home: homeTeam,
+    away: awayTeam,
+  };
+
+  return runQuantitativeAnalyst(input);
+}
+
 export async function enrichEspnMatchWithFotmob(params: {
   espnMatch: any;
   leagueSlug: string;
@@ -965,6 +1393,79 @@ export async function enrichEspnMatchWithFotmob(params: {
 
   const recomputed = computeProbabilitiesFromLambdas(adjLambdaHome, adjLambdaAway);
 
+  // 6bis. MOTEUR D'ANALYSE QUANTITATIVE v2 — 8 modules (Dixon-Coles, calendrier,
+  // npxG & coups de pied arrêtés, absences intelligentes, tactique, calibration
+  // marché, congestion 14 jours, Monte-Carlo 10 000 itérations).
+  let analystReport: any = null;
+  if (deepTeamFetch && homeTeamPayload && awayTeamPayload) {
+    try {
+      analystReport = buildAnalystReportV2({
+        homeTeamPayload,
+        awayTeamPayload,
+        homeTeamId,
+        awayTeamId,
+        homeName: espnMatch.home.name,
+        awayName: espnMatch.away.name,
+        kickoffIso: espnMatch.date || new Date().toISOString(),
+        matchId: String(matchedDayItem.id),
+        baseLambdas: { home: adjLambdaHome, away: adjLambdaAway },
+        market: espnMatch.market,
+        referee,
+        weather: fotmobWeather,
+        h2h: h2hEnriched
+          ? {
+              count: h2hEnriched.count,
+              homeGoalsAvg: h2hEnriched.homeGoalsAvg,
+              awayGoalsAvg: h2hEnriched.awayGoalsAvg,
+            }
+          : null,
+        homeAbsences,
+        awayAbsences,
+        homeLineup: lineup?.homeTeam,
+        awayLineup: lineup?.awayTeam,
+        homeFormation,
+        awayFormation,
+      });
+    } catch {
+      analystReport = null;
+    }
+  }
+
+  // Probabilités finales : modèle bivarié calibré sur le marché lorsqu'il est disponible
+  let finalExpectedGoals = recomputed.expectedGoals;
+  let finalProbabilities: any = recomputed.probabilities;
+  let finalTopScores = recomputed.topScores;
+
+  if (analystReport) {
+    const total = analystReport.lambdas.total;
+    const lH1 = total * 0.44;
+    const noGoalH1 = Math.exp(-lH1);
+    const shareHome = total > 0 ? analystReport.lambdas.home / total : 0.5;
+
+    finalExpectedGoals = { home: analystReport.lambdas.home, away: analystReport.lambdas.away };
+    finalProbabilities = {
+      home: analystReport.market.calibrated.home,
+      draw: analystReport.market.calibrated.draw,
+      away: analystReport.market.calibrated.away,
+      bttsYes: analystReport.model.btts,
+      bttsNo: Number((1 - analystReport.model.btts).toFixed(4)),
+      over15: analystReport.model.over15,
+      under15: Number((1 - analystReport.model.over15).toFixed(4)),
+      over25: analystReport.market.calibrated.over25,
+      under25: Number((1 - analystReport.market.calibrated.over25).toFixed(4)),
+      over35: analystReport.model.over35,
+      under35: Number((1 - analystReport.model.over35).toFixed(4)),
+      firstHome: analystReport.model.firstHome,
+      firstAway: analystReport.model.firstAway,
+      noGoal: analystReport.model.noGoal,
+      firstHalf: analystReport.model.firstHalf,
+      secondHalf: analystReport.model.secondHalf,
+      firstHomeH1: Number(((1 - noGoalH1) * shareHome).toFixed(4)),
+      firstAwayH1: Number(((1 - noGoalH1) * (1 - shareHome)).toFixed(4)),
+    };
+    finalTopScores = analystReport.model.topScores.slice(0, 5);
+  }
+
   // 7. Mise à jour du score de vigilance avec les signaux d'effectif et d'écart marché/modèle
   const market = espnMatch.market;
   const reasons: string[] = [];
@@ -1018,6 +1519,40 @@ export async function enrichEspnMatchWithFotmob(params: {
     reasons.push('Échantillon récent réduit (< 3 matchs sur 60 jours) : incertitude statistique accrue.');
   }
 
+  if (analystReport) {
+    const edgeMax = Math.max(
+      Math.abs(analystReport.market.edges.home || 0),
+      Math.abs(analystReport.market.edges.draw || 0),
+      Math.abs(analystReport.market.edges.away || 0)
+    );
+    if (edgeMax >= 0.05) {
+      vigilanceScore += 8;
+      reasons.push(
+        `Écart significatif entre le modèle quantitatif (8 modules) et le marché : ${Math.round(edgeMax * 100)} points.`
+      );
+    }
+    const maxFatigue = Math.max(
+      analystReport.context.home.fatigue || 0,
+      analystReport.context.away.fatigue || 0
+    );
+    if (maxFatigue >= 0.55) {
+      vigilanceScore += 8;
+      reasons.push(
+        `Charge de calendrier élevée sur les 14 derniers jours (indice ${Math.round(maxFatigue * 100)} %) : performances possibles en baisse.`
+      );
+    }
+    if (analystReport.absences.officialLineup.available) {
+      const rot = Math.min(
+        analystReport.absences.officialLineup.home?.rotation ?? 1,
+        analystReport.absences.officialLineup.away?.rotation ?? 1
+      );
+      if (rot < 0.93) {
+        vigilanceScore += 8;
+        reasons.push('Composition officielle publiée : rotation ou changement de onze important par rapport au noyau habitual.');
+      }
+    }
+  }
+
   if (referee && typeof referee.yellowPerMatch === 'number' && referee.yellowPerMatch >= 4.6) {
     vigilanceScore += 5;
     reasons.push(
@@ -1038,7 +1573,7 @@ export async function enrichEspnMatchWithFotmob(params: {
       resume: h2hEnriched.resume,
       note: h2hEnriched.note,
       detail: h2hEnriched.detail,
-      source: 'FotMob',
+      source: 'Statistiques publiques',
     };
   }
 
@@ -1162,11 +1697,12 @@ export async function enrichEspnMatchWithFotmob(params: {
 
   return {
     ...espnMatch,
-    expectedGoals: recomputed.expectedGoals,
+    expectedGoals: finalExpectedGoals,
     baseExpectedGoalsEspn: espnMatch.expectedGoals,
     realMatchXg: liveOrFinalMatchXg,
-    probabilities: recomputed.probabilities,
-    topScores: recomputed.topScores,
+    probabilities: finalProbabilities,
+    topScores: finalTopScores,
+    analyst: analystReport,
     vigilance: {
       score: vigilanceScore,
       level: vigilanceLevel,

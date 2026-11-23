@@ -14,9 +14,26 @@ function sanitizeUpstreamText(text: any): any {
     .trim();
 }
 
+function sanitizeDeep(node: any, depth = 0): any {
+  if (depth > 6) return node;
+  if (typeof node === 'string') return sanitizeUpstreamText(node);
+  if (Array.isArray(node)) return node.map(item => sanitizeDeep(item, depth + 1));
+  if (node && typeof node === 'object') {
+    const out: any = {};
+    for (const key of Object.keys(node)) {
+      out[key] = sanitizeDeep(node[key], depth + 1);
+    }
+    return out;
+  }
+  return node;
+}
+
 function sanitizeMatchStrings(match: any): any {
   if (!match || typeof match !== 'object') return match;
   const next = { ...match };
+  if (next.analyst) {
+    next.analyst = sanitizeDeep(next.analyst);
+  }
   if (next.vigilance && Array.isArray(next.vigilance.reasons)) {
     next.vigilance = {
       ...next.vigilance,
@@ -35,6 +52,7 @@ function sanitizeMatchStrings(match: any): any {
         if (typeof card.resume === 'string') card.resume = sanitizeUpstreamText(card.resume);
         if (typeof card.home === 'string') card.home = sanitizeUpstreamText(card.home);
         if (typeof card.away === 'string') card.away = sanitizeUpstreamText(card.away);
+        if (typeof card.source === 'string') card.source = 'Statistiques publiques';
         f[key] = card;
       }
     }
@@ -75,7 +93,7 @@ export async function GET(request: NextRequest) {
     if (!rawMatches.length) {
       return NextResponse.json({
         ...basePayload,
-        sources: ['ESPN'],
+        sources: ['Données publiques'],
       });
     }
 
@@ -105,7 +123,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       ...basePayload,
       matches: enrichedMatches,
-      sources: anyFotmob ? ['ESPN', 'FotMob'] : ['ESPN'],
+      sources: anyFotmob ? ['Données publiques', 'Statistiques détaillées'] : ['Données publiques'],
     });
   } catch {
     return NextResponse.json(

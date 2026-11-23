@@ -1,22 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Fixture, isFixtureFinished, longDate, pct, Team, timeOf } from '../lib/terrain';
+import { TeamBadge } from './TeamBadge';
+import { AiAnalysisLoader, MIN_ANALYSIS_MS } from './AiAnalysisLoader';
+import { AnalystReportView } from './AnalystReportView';
 
-export function TeamBadge({ team, size = 36 }: { team?: Team; size?: number }) {
-  const [broken, setBroken] = useState(false);
-  useEffect(() => setBroken(false), [team?.id, team?.logo]);
-  const logo = team?.logo || (team?.id ? `https://a.espncdn.com/i/teamlogos/soccer/500/${team.id}.png` : '');
-  return (
-    <span className="teamBadge" style={{ width: size, height: size }}>
-      {logo && !broken ? (
-        <img src={logo} alt={`${team?.name || 'Équipe'} — logo`} loading="lazy" onError={() => setBroken(true)} />
-      ) : (
-        <span>{(team?.short || team?.name || '?').slice(0, 3)}</span>
-      )}
-    </span>
-  );
-}
+export { TeamBadge };
 
 function ProbBar({ label, value, color = 'var(--green)' }: { label: string; value: any; color?: string }) {
   const width = typeof value === 'number' ? Math.max(2, Math.min(100, value * 100)) : 0;
@@ -173,7 +163,26 @@ export function MatchAnalysisPanel({
   const [analysis, setAnalysis] = useState<any>(null);
   const [analysisLoading, setAnalysisLoading] = useState(true);
   const [analysisError, setAnalysisError] = useState('');
-  const [tab, setTab] = useState<'resume' | 'facteurs' | 'vigilance'>('resume');
+  const [tab, setTab] = useState<'resume' | 'facteurs' | 'analyste' | 'vigilance'>('resume');
+  const [loaderElapsed, setLoaderElapsed] = useState(0);
+  const [loaderProgress, setLoaderProgress] = useState(0);
+  const loaderStartRef = useRef<number>(Date.now());
+
+  // Séquence d'analyse de 10 secondes minimum : elle démarre à l'ouverture du match
+  // et tourne en parallèle de la récupération des données.
+  useEffect(() => {
+    loaderStartRef.current = Date.now();
+    setLoaderElapsed(0);
+    setLoaderProgress(0);
+    const id = window.setInterval(() => {
+      const elapsed = Date.now() - loaderStartRef.current;
+      setLoaderElapsed(elapsed);
+      const ratio = Math.min(1, elapsed / MIN_ANALYSIS_MS);
+      const eased = 1 - Math.pow(1 - ratio, 3);
+      setLoaderProgress(Math.min(98, eased * 98));
+    }, 60);
+    return () => window.clearInterval(id);
+  }, [matchId]);
 
   useEffect(() => {
     if (initialFixture) {
@@ -253,6 +262,12 @@ export function MatchAnalysisPanel({
   const freshHome = factors.forme?.fraicheurHome?.count ?? 0;
   const freshAway = factors.forme?.fraicheurAway?.count ?? 0;
   const finished = fixture ? isFixtureFinished(fixture) : false;
+
+  const analyst = analysis?.analyst || null;
+  const dataReady = !analysisLoading;
+  const minElapsedReached = loaderElapsed >= MIN_ANALYSIS_MS;
+  const showLoader = !(minElapsedReached && dataReady);
+  const effectiveProgress = showLoader ? loaderProgress : 100;
 
   const referee = factors.autres?.arbitre || fotmob?.referee || null;
   const coaches = factors.autres?.entraineurs || fotmob?.coaches || null;
@@ -347,14 +362,26 @@ export function MatchAnalysisPanel({
             )}
           </div>
 
+          {showLoader ? (
+            <AiAnalysisLoader
+              fixture={fixture}
+              elapsed={loaderElapsed}
+              progress={effectiveProgress}
+              dataReady={dataReady}
+              analyst={analyst}
+            />
+          ) : (
+            <>
           <div className="analysisTabs">
             {([
               ['resume', 'Vue d’ensemble'],
+              ['analyste', 'Analyste IA'],
               ['facteurs', '8 facteurs'],
               ['vigilance', 'Vigilance'],
             ] as const).map(([id, label]) => (
               <button key={id} className={tab === id ? 'tabActive' : ''} onClick={() => setTab(id)}>
                 {label}
+                {id === 'analyste' && analyst ? <small className="tabCountTag">8 modules</small> : null}
                 {id === 'facteurs' && (homeAbsenceCount || awayAbsenceCount) ? (
                   <small className="tabCountTag">{(homeAbsenceCount || 0) + (awayAbsenceCount || 0)} abs.</small>
                 ) : null}
@@ -363,31 +390,54 @@ export function MatchAnalysisPanel({
             ))}
           </div>
 
-          {analysisLoading && (
-            <div className="analysisLoading">
-              <i className="largeSpinner" />
-              <div>
-                <b>Analyse en cours</b>
-                <span>Calcul des xG, absences, confrontations directes et indicateurs…</span>
-              </div>
-            </div>
-          )}
+          {analysisError && <div className="analysisError">{analysisError}</div>}
 
-          {!analysisLoading && analysisError && <div className="analysisError">{analysisError}</div>}
-
-          {!analysisLoading && analysis && tab === 'resume' && (
+          {analysis && tab === 'resume' && (
             <>
               <div className="predictionIntro">
                 <div>
-                  <span className="sectionKicker">MODÈLE STATISTIQUE ENRICHI</span>
+                  <span className="sectionKicker">
+                    {analyst ? 'MOTEUR QUANTITATIF V2 · 8 MODULES' : 'MODÈLE STATISTIQUE ENRICHI'}
+                  </span>
                   <h3>Estimations du match</h3>
                   <small>
                     Forme récente ({freshHome}/5 & {freshAway}/5 matchs)
-                    {fotmob ? ' · xG, effectifs & confrontations intégrés' : ' · sur 60 jours max'}
+                    {analyst
+                      ? ' · Dixon-Coles, calendrier ajusté, Monte-Carlo 10 000'
+                      : fotmob
+                      ? ' · xG, effectifs & confrontations intégrés'
+                      : ' · sur 60 jours max'}
                   </small>
                 </div>
-                <span className="modelMark">{fotmob ? 'Poisson + xG' : 'Poisson'}</span>
+                <span className="modelMark">{analyst ? 'Dixon-Coles + xG' : fotmob ? 'Poisson + xG' : 'Poisson'}</span>
               </div>
+              {analyst && (
+                <div className="analystStrip">
+                  <div className="analystStripScore">
+                    <span>CONFIANCE ANALYSTE</span>
+                    <b>
+                      {analyst.confidence?.score ?? '—'}
+                      <small>/100</small>
+                    </b>
+                    <em>{analyst.confidence?.label || '—'}</em>
+                  </div>
+                  <div className="analystStripBody">
+                    <span className="sectionKicker">SYNTHÈSE DE L’ANALYSTE IA</span>
+                    <b>{analyst.synthesis?.headline}</b>
+                    <p>{analyst.synthesis?.text}</p>
+                    <div className="analystStripMeta">
+                      <span>λ {analyst.lambdas?.home} – {analyst.lambdas?.away}</span>
+                      <span>ρ {analyst.dixonColes?.rho}</span>
+                      <span>MC 10 000</span>
+                      <span>temps pondéré e^(−ξΔt)</span>
+                    </div>
+                  </div>
+                  <button type="button" onClick={() => setTab('analyste')}>
+                    Rapport complet <span>→</span>
+                  </button>
+                </div>
+              )}
+
               {(freshHome < 5 || freshAway < 5) && (
                 <div className="dataWarning">
                   Échantillon récent incomplet. Les données plus anciennes sont exclues ; la confiance dans l’estimation est donc plus
@@ -562,7 +612,7 @@ export function MatchAnalysisPanel({
             </>
           )}
 
-          {!analysisLoading && analysis && tab === 'facteurs' && (
+          {analysis && tab === 'facteurs' && (
             <div className="factorArea">
               <div className="subsectionHeading">
                 <span className="sectionKicker">MÉTHODE RAPIDE EN 5 MINUTES</span>
@@ -693,7 +743,9 @@ export function MatchAnalysisPanel({
             </div>
           )}
 
-          {!analysisLoading && analysis && tab === 'vigilance' && (
+          {analysis && tab === 'analyste' && <AnalystReportView analyst={analyst} />}
+
+          {analysis && tab === 'vigilance' && (
             <div className="vigilancePage">
               <div className={`vigilanceScore ${vigilance.score >= 30 ? 'vigilanceWarn' : ''}`}>
                 <span>INDICE EXPLORATOIRE</span>
@@ -726,8 +778,18 @@ export function MatchAnalysisPanel({
               </div>
             </div>
           )}
+            </>
+          )}
         </>
-      ) : fixtureLoading || analysisLoading ? (
+      ) : showLoader ? (
+        <AiAnalysisLoader
+          fixture={null}
+          elapsed={loaderElapsed}
+          progress={effectiveProgress}
+          dataReady={dataReady}
+          analyst={analyst}
+        />
+      ) : fixtureLoading ? (
         <div className="analysisLoading">
           <i className="largeSpinner" />
           <div>
