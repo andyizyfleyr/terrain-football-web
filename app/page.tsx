@@ -230,7 +230,7 @@ export default function Home() {
           <button className="scanButton" onClick={scanDay} disabled={screening}>{screening ? <><i className="tinySpinner"/> Scan de vigilance en cours…</> : <>⌕ &nbsp; Scanner cette journée</>}</button>
           <div className="matchList">{dayFixtures.map((item, index) => {
             const score = screenedScores[item.id];
-            const finished = item.home?.score !== null && item.away?.score !== null;
+            const finished = Date.parse(item.date) <= Date.now() && item.home?.score !== null && item.away?.score !== null;
             return <button key={item.id} className={`matchCard ${selectedMatch === item.id ? 'matchSelected' : ''}`} onClick={() => selectFixture(item.id)}>
               <span className="matchCardTop"><span className="matchOrdinal">{String(index + 1).padStart(2, '0')}</span><span>{timeOf(item.date)} · COT</span>{score && <span className={`riskBadge ${score.score >= 30 ? 'riskHigh' : ''}`} title={`Signal exploratoire : ${score.level}`}>Vigilance {score.score}</span>}</span>
               <span className="matchTeams"><span><TeamBadge team={item.home} size={34}/><b>{item.home?.name}</b>{finished && <strong>{item.home?.score}</strong>}</span><span><TeamBadge team={item.away} size={34}/><b>{item.away?.name}</b>{finished && <strong>{item.away?.score}</strong>}</span></span>
