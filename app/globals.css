@@ -531,3 +531,38 @@
 @media(max-width:430px){
   .calibGrid,.measureGrid{grid-template-columns:1fr}
 }
+
+/* ---------- Moteur V3 : calibration empirique & incertitude ---------- */
+.probLabel em.probInterval{margin-left:auto;padding:1px 5px;border-radius:999px;background:#f1f6f2;color:#7f8d84;font:600 8px 'DM Mono',monospace;font-style:normal;white-space:nowrap}
+.analystStripScore>small.analystStripMeasured{display:block;margin-top:6px;color:#4e7c5e;font:600 8.5px 'DM Mono',monospace;line-height:1.35}
+.calibrationGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin:12px 0}
+.calibrationCard{padding:11px;border:1px solid #e3ebe5;border-radius:11px;background:#fbfdfb}
+.calibrationCard small{display:block;color:#95a199;font:500 7.5px 'DM Mono',monospace;letter-spacing:.5px;text-transform:uppercase}
+.calibrationCard b{display:block;margin:5px 0 4px;color:#2c4134;font:700 12px 'DM Mono',monospace;line-height:1.2}
+.calibrationCard em{display:block;color:#8b978f;font-size:8.5px;font-style:normal;line-height:1.4}
+.calibrationTwoCol{grid-template-columns:minmax(0,1.15fr) minmax(0,1fr)}
+.analystMiniTable>div:not(.analystMiniHead)>em.calibrationRead{color:#94a098;font-size:8.5px;font-style:normal;text-align:right;line-height:1.35}
+.measuredConfidence{margin-top:11px;padding:12px;border:1px solid #d9e9de;border-radius:12px;background:linear-gradient(120deg,#f2f9f4,#fdfefd 70%)}
+.measuredConfidenceHead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.measuredConfidenceHead>b{color:var(--green);font:800 20px 'DM Mono',monospace}
+.measuredConfidenceHead>b small{color:#6f8c79;font-size:11px}
+.measuredConfidence p{margin:7px 0 0;color:#5d6c62;font-size:9.5px;line-height:1.5}
+.measuredConfidenceMeta{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.measuredConfidenceMeta span{padding:3px 8px;border-radius:999px;background:#fff;border:1px solid #e1ece4;color:#5c7264;font:600 8.5px 'DM Mono',monospace}
+.measuredConfidence p.measuredConfidenceNote{color:#8b978f;font-size:8.5px}
+.calibrationStructure{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-top:11px}
+.calibrationStructureCard{padding:11px;border:1px solid #e6ece7;border-radius:11px;background:#fff}
+.calibrationStructureCard small{display:block;color:#95a199;font:500 7.5px 'DM Mono',monospace;letter-spacing:.4px;text-transform:uppercase}
+.calibrationStructureCard b{display:block;margin:5px 0 4px;color:#2c4134;font:700 11.5px 'DM Mono',monospace}
+.calibrationStructureCard em{display:block;color:#8b978f;font-size:8.5px;font-style:normal;line-height:1.45}
+.calibrationLimits{margin-top:11px;padding:12px;border:1px solid #efe4cd;border-radius:12px;background:#fffaf1}
+.calibrationLimits ul{margin:7px 0 0;padding-left:16px;color:#7c6a45;font-size:9px;line-height:1.55}
+.calibrationLimits li+li{margin-top:4px}
+@media(max-width:900px){
+  .calibrationGrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .calibrationStructure{grid-template-columns:1fr}
+}
+@media(max-width:760px){
+  .calibrationGrid{grid-template-columns:1fr}
+  .calibrationTwoCol{grid-template-columns:1fr}
+}

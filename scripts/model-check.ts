@@ -19,6 +19,8 @@ import {
   credibleInterval,
   estimateCovariance,
   estimateFirstHalfShare,
+  poissonCdf,
+  poissonOver,
   poissonPmf,
   summariseScoreMatrix,
 } from '../app/lib/poissonModels.ts';
@@ -43,7 +45,7 @@ import {
   valueAssessment,
 } from '../app/lib/calibration.ts';
 import { DEFAULT_CALIBRATION } from '../app/lib/calibrationParams.ts';
-import { runQuantitativeAnalyst } from '../app/lib/analystEngine.ts';
+import { runQuantitativeAnalyst, shrunkMean, shrunkRatio } from '../app/lib/analystEngine.ts';
 
 let failures = 0;
 function check(label: string, condition: boolean, detail?: string) {
@@ -55,6 +57,77 @@ function check(label: string, condition: boolean, detail?: string) {
   }
 }
 const close = (a: number, b: number, tol: number) => Math.abs(a - b) <= tol;
+
+console.log('0. Poisson simple (PMF, CDF, survol)');
+{
+  const lambda = 1.45;
+  check('P(X=0) = e^{−λ}', close(poissonPmf(0, lambda), Math.exp(-lambda), 1e-12));
+  check(
+    'P(X=1) = λ·e^{−λ}',
+    close(poissonPmf(1, lambda), lambda * Math.exp(-lambda), 1e-12)
+  );
+  check(
+    'P(X=2) = λ²/2·e^{−λ}',
+    close(poissonPmf(2, lambda), (lambda * lambda * Math.exp(-lambda)) / 2, 1e-12)
+  );
+
+  // La masse doit sommer à 1 (le défaut historique inversait k!).
+  let mass = 0;
+  for (let k = 0; k <= 40; k++) mass += poissonPmf(k, lambda);
+  check('somme de la masse = 1', close(mass, 1, 1e-10), `somme=${mass.toFixed(12)}`);
+
+  // La moyenne de la distribution doit valoir λ.
+  let mean = 0;
+  for (let k = 0; k <= 40; k++) mean += k * poissonPmf(k, lambda);
+  check('moyenne de la distribution = λ', close(mean, lambda, 1e-9), `moyenne=${mean.toFixed(9)}`);
+
+  // La CDF et le survol doivent être cohérents.
+  check('CDF(0) = P(X=0)', close(poissonCdf(0, lambda), poissonPmf(0, lambda), 1e-12));
+  check(
+    'survol = 1 − CDF',
+    close(poissonOver(lambda, 2), 1 - poissonCdf(2, lambda), 1e-12),
+    `survol=${poissonOver(lambda, 2).toFixed(6)}`
+  );
+  check(
+    'survol 2,5 buts cohérent avec λ=1,45',
+    close(poissonOver(1.45, 2), 1 - (0.2346 + 0.3401 + 0.2466), 1e-3),
+    `survol=${poissonOver(1.45, 2).toFixed(4)}`
+  );
+  check('PMF nulle pour k négatif', poissonPmf(-1, lambda) === 0);
+  check('PMF dégénérée quand λ = 0', poissonPmf(0, 0) === 1 && poissonPmf(3, 0) === 0);
+}
+
+console.log('0bis. Rétrécissement empirique (shrinkage)');
+{
+  check(
+    'moyenne rétrécie : sans donnée, référence conservée',
+    close(shrunkMean([], 1.35, 4), 1.35, 1e-12)
+  );
+  check(
+    'moyenne rétrécie : forte pondération ⇒ proche de la référence',
+    close(shrunkMean([3, 3, 3], 1.35, 40), (9 + 1.35 * 40) / 43, 1e-12),
+    `${shrunkMean([3, 3, 3], 1.35, 40).toFixed(6)}`
+  );
+  check(
+    'moyenne rétrécie : sans pondération ⇒ moyenne brute',
+    close(shrunkMean([1, 2, 3], 1.35, 0), 2, 1e-12)
+  );
+  check(
+    'ratio rétréci : sans échantillon ⇒ 1',
+    close(shrunkRatio(2, 1.3, 0, 4), 1, 1e-12)
+  );
+  check(
+    'ratio rétréci : fortement amorti sur petit échantillon',
+    shrunkRatio(3, 1.3, 1, 4) < 1.6,
+    `${shrunkRatio(3, 1.3, 1, 4).toFixed(3)}`
+  );
+  check(
+    'ratio rétréci : peu amorti sur grand échantillon',
+    shrunkRatio(3, 1.3, 60, 4) > 2.0,
+    `${shrunkRatio(3, 1.3, 60, 4).toFixed(3)}`
+  );
+  check('ratio rétréci : borné', shrunkRatio(99, 1, 100, 4) <= 2.6);
+}
 
 console.log('1. Poisson bivarié & covariance');
 {

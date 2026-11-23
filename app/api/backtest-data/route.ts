@@ -103,6 +103,13 @@ function readHalfTime(details: any): { htHome: number; htAway: number } | null {
       for (const event of list) {
         const period = event?.shotmapEvent?.period || event?.period;
         if (period !== 'FirstHalf') continue;
+        // Un but contre son propre camp est crédité au joueur fautif :
+        // il appartient au camp adverse, pas au camp de l'événement.
+        const ownGoal =
+          event?.ownGoal === true ||
+          event?.shotmapEvent?.ownGoal === true ||
+          String(event?.type || '').toLowerCase() === 'owngoal';
+        if (ownGoal) continue;
         if (side === 'home') htHome += 1;
         else htAway += 1;
       }
@@ -294,6 +301,12 @@ export async function GET(request: NextRequest) {
 
       const xg = readXg(details);
       const halfTime = readHalfTime(details);
+      // Garde-fou qualité : un score à la mi-temps ne peut pas dépasser le
+      // score final. En cas d'incohérence, on préfère l'inconnu.
+      const halfTimeSafe =
+        halfTime && halfTime.htHome <= match.homeScore && halfTime.htAway <= match.awayScore
+          ? halfTime
+          : null;
       const halfTimeXg = readHalfTimeXg(details);
       const referee = readReferee(details);
       const weather = details?.content?.weather || null;
@@ -340,8 +353,8 @@ export async function GET(request: NextRequest) {
         awayGoals: match.awayScore,
         homeXg: xg.homeXg,
         awayXg: xg.awayXg,
-        htHome: halfTime?.htHome ?? null,
-        htAway: halfTime?.htAway ?? null,
+        htHome: halfTimeSafe?.htHome ?? null,
+        htAway: halfTimeSafe?.htAway ?? null,
         htXgHome: halfTimeXg.htXgHome,
         htXgAway: halfTimeXg.htXgAway,
         homeShots: homeShots.length || null,

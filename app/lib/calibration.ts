@@ -61,8 +61,12 @@ export type CalibrationParams = {
   valueThreshold: number;
   /** Concentration Beta effective pour les intervalles de crédibilité. */
   effectiveSampleSize: number;
-  /** Coefficients de la régression logistique (confiance → probabilité). */
-  logistic: { intercept: number; separation: number; agreement: number };
+  /**
+   * Coefficients de la régression logistique (confiance → probabilité).
+   * `marketPick` : probabilité que le marché attribue à l'issue retenue
+   * par le modèle (variable la plus informative hors échantillon).
+   */
+  logistic: { intercept: number; separation: number; agreement: number; marketPick?: number };
   confidenceBins: ConfidenceBin[];
   metrics: CalibrationMetrics;
   dataset: string;
@@ -118,10 +122,15 @@ export function applyCalibration(
 export function calibratedConfidence(
   params: CalibrationParams,
   separation: number,
-  agreement: number
+  agreement: number,
+  marketPick?: number | null
 ): { probability: number; label: string } {
-  const { intercept, separation: bSep, agreement: bAgr } = params.logistic;
-  const z = intercept + bSep * separation + bAgr * agreement;
+  const { intercept, separation: bSep, agreement: bAgr, marketPick: bPick = 0 } = params.logistic;
+  const z =
+    intercept +
+    bSep * separation +
+    bAgr * agreement +
+    bPick * (typeof marketPick === 'number' && Number.isFinite(marketPick) ? marketPick : 0);
   const probability = 1 / (1 + Math.exp(-z));
   const label =
     probability >= 0.72

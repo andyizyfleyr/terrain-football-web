@@ -24,13 +24,18 @@
  * Toutes les fonctions de ce module sont pures et testables.
  */
 
-/** Fonction de masse de Poisson. */
+/**
+ * Fonction de masse de Poisson : P(X = k) = e^{−λ} λ^k / k!.
+ *
+ * Le calcul se fait en logarithmes (log k! par somme de logarithmes) pour
+ * rester stable quand λ est grand.
+ */
 export function poissonPmf(k: number, lambda: number): number {
   if (!Number.isFinite(lambda) || lambda <= 0) return k === 0 ? 1 : 0;
   if (!Number.isInteger(k) || k < 0) return 0;
-  let logP = -lambda;
-  for (let i = 2; i <= k; i++) logP += Math.log(i);
-  return Math.exp(logP + k * Math.log(lambda));
+  let logFactorial = 0;
+  for (let i = 2; i <= k; i++) logFactorial += Math.log(i);
+  return Math.exp(-lambda + k * Math.log(lambda) - logFactorial);
 }
 
 /** Fonction de répartition cumulative de Poisson. */

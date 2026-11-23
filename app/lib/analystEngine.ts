@@ -1494,6 +1494,41 @@ function runMonteCarlo(params: {
 }
 
 /* ------------------------------------------------------------------ */
+/* Rétrécissement empirique (shrinkage)                                 */
+/* ------------------------------------------------------------------ */
+/*
+ * Un ratio calculé sur une ou deux rencontres est aussi informatif qu'un
+ * tirage au sort : on le ramène donc vers la valeur de référence du
+ * championnat, avec un poids de quelques matchs fictifs (prior
+ * empirique). C'est ce qui rend le modèle utilisable en début de saison
+ * comme en cours de saison.
+ */
+
+/** Moyenne rétrécie vers une référence de championnat. */
+export function shrunkMean(values: number[], reference: number, priorWeight = 4): number {
+  const usable = values.filter(v => Number.isFinite(v));
+  if (!usable.length) return reference;
+  const total = usable.reduce((a, b) => a + b, 0);
+  return (total + reference * priorWeight) / (usable.length + priorWeight);
+}
+
+/** Ratio rétréci vers 1 selon le nombre de matchs observés. */
+export function shrunkRatio(
+  value: number,
+  reference: number,
+  sampleSize: number,
+  priorMatches = 4,
+  min = 0.35,
+  max = 2.6
+): number {
+  if (!Number.isFinite(value) || !Number.isFinite(reference) || value <= 0 || reference <= 0) return 1;
+  const n = Math.max(0, sampleSize);
+  const weight = n / (n + priorMatches);
+  const ratio = weight * (value / reference) + (1 - weight);
+  return clamp(ratio, min, max);
+}
+
+/* ------------------------------------------------------------------ */
 /* Assemblage principal                                                */
 /* ------------------------------------------------------------------ */
 
@@ -1503,29 +1538,31 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
 
   /* --- Module 02 : base de référence du championnat ------------------- */
   const xgRows = league.xgRows || [];
-  const leagueAvgXg = useAvg(xgRows.map(r => (r.xg || 0) / Math.max(1, r.played)), 1.35);
-  const leagueAvgXga = useAvg(xgRows.map(r => (r.xgConceded || 0) / Math.max(1, r.played)), leagueAvgXg);
-  const leagueAvgGoals = useAvg(
+  // Prior empirique : 4 « équipes fictives » valent la référence de
+  // championnat, ce qui stabilise fortement le début de saison.
+  const leagueAvgXg = shrunkMean(xgRows.map(r => (r.xg || 0) / Math.max(1, r.played)), 1.35);
+  const leagueAvgXga = shrunkMean(xgRows.map(r => (r.xgConceded || 0) / Math.max(1, r.played)), leagueAvgXg);
+  const leagueAvgGoals = shrunkMean(
     (league.rowsAll || []).map(r => goalsFor(r) / Math.max(1, r.played)),
     1.45
   );
-  const leagueAvgGoalsAgainst = useAvg(
+  const leagueAvgGoalsAgainst = shrunkMean(
     (league.rowsAll || []).map(r => goalsAgainst(r) / Math.max(1, r.played)),
     leagueAvgGoals
   );
-  const leagueHomeGoals = useAvg(
+  const leagueHomeGoals = shrunkMean(
     (league.rowsHome || []).map(r => goalsFor(r) / Math.max(1, r.played)),
     leagueAvgGoals * 1.14
   );
-  const leagueAwayGoals = useAvg(
+  const leagueAwayGoals = shrunkMean(
     (league.rowsAway || []).map(r => goalsFor(r) / Math.max(1, r.played)),
     leagueAvgGoals * 0.86
   );
-  const leagueHomeAgainst = useAvg(
+  const leagueHomeAgainst = shrunkMean(
     (league.rowsHome || []).map(r => goalsAgainst(r) / Math.max(1, r.played)),
     leagueAvgGoalsAgainst * 0.94
   );
-  const leagueAwayAgainst = useAvg(
+  const leagueAwayAgainst = shrunkMean(
     (league.rowsAway || []).map(r => goalsAgainst(r) / Math.max(1, r.played)),
     leagueAvgGoalsAgainst * 1.06
   );
@@ -1548,20 +1585,25 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   const awaySplitAttack = goalsFor(away.tableAway) / Math.max(1, away.tableAway?.played || 1);
   const awaySplitDefence = goalsAgainst(away.tableAway) / Math.max(1, away.tableAway?.played || 1);
 
-  const relSeasonAttackHome = homeSeasonAttack > 0 ? clamp(homeSeasonAttack / leagueAvgXg, 0.35, 2.6) : 1;
-  const relSeasonDefHome = homeSeasonDefence > 0 ? clamp(homeSeasonDefence / leagueAvgXga, 0.35, 2.6) : 1;
-  const relSeasonAttackAway = awaySeasonAttack > 0 ? clamp(awaySeasonAttack / leagueAvgXg, 0.35, 2.6) : 1;
-  const relSeasonDefAway = awaySeasonDefence > 0 ? clamp(awaySeasonDefence / leagueAvgXga, 0.35, 2.6) : 1;
+  const homeSeasonPlayed = home.xgRow?.played || home.tableAll?.played || 0;
+  const awaySeasonPlayed = away.xgRow?.played || away.tableAll?.played || 0;
+  const homeSplitPlayed = home.tableHome?.played || 0;
+  const awaySplitPlayed = away.tableAway?.played || 0;
 
-  const relFormAttackHome = formHome.matches ? clamp(formHome.attack / leagueAvgGoals, 0.35, 2.6) : 1;
-  const relFormDefHome = formHome.matches ? clamp(formHome.defence / leagueAvgGoalsAgainst, 0.35, 2.6) : 1;
-  const relFormAttackAway = formAway.matches ? clamp(formAway.attack / leagueAvgGoals, 0.35, 2.6) : 1;
-  const relFormDefAway = formAway.matches ? clamp(formAway.defence / leagueAvgGoalsAgainst, 0.35, 2.6) : 1;
+  const relSeasonAttackHome = shrunkRatio(homeSeasonAttack, leagueAvgXg, homeSeasonPlayed);
+  const relSeasonDefHome = shrunkRatio(homeSeasonDefence, leagueAvgXga, homeSeasonPlayed);
+  const relSeasonAttackAway = shrunkRatio(awaySeasonAttack, leagueAvgXg, awaySeasonPlayed);
+  const relSeasonDefAway = shrunkRatio(awaySeasonDefence, leagueAvgXga, awaySeasonPlayed);
 
-  const relSplitAttackHome = homeSplitAttack > 0 ? clamp(homeSplitAttack / leagueHomeGoals, 0.35, 2.6) : 1;
-  const relSplitDefHome = homeSplitDefence > 0 ? clamp(homeSplitDefence / leagueHomeAgainst, 0.35, 2.6) : 1;
-  const relSplitAttackAway = awaySplitAttack > 0 ? clamp(awaySplitAttack / leagueAwayGoals, 0.35, 2.6) : 1;
-  const relSplitDefAway = awaySplitDefence > 0 ? clamp(awaySplitDefence / leagueAwayAgainst, 0.35, 2.6) : 1;
+  const relFormAttackHome = shrunkRatio(formHome.attack, leagueAvgGoals, formHome.matches);
+  const relFormDefHome = shrunkRatio(formHome.defence, leagueAvgGoalsAgainst, formHome.matches);
+  const relFormAttackAway = shrunkRatio(formAway.attack, leagueAvgGoals, formAway.matches);
+  const relFormDefAway = shrunkRatio(formAway.defence, leagueAvgGoalsAgainst, formAway.matches);
+
+  const relSplitAttackHome = shrunkRatio(homeSplitAttack, leagueHomeGoals, homeSplitPlayed);
+  const relSplitDefHome = shrunkRatio(homeSplitDefence, leagueHomeAgainst, homeSplitPlayed);
+  const relSplitAttackAway = shrunkRatio(awaySplitAttack, leagueAwayGoals, awaySplitPlayed);
+  const relSplitDefAway = shrunkRatio(awaySplitDefence, leagueAwayAgainst, awaySplitPlayed);
 
   const attackHome = 0.42 * relSeasonAttackHome + 0.33 * relFormAttackHome + 0.25 * relSplitAttackHome;
   const defenceHome = 0.42 * relSeasonDefHome + 0.33 * relFormDefHome + 0.25 * relSplitDefHome;
@@ -1963,7 +2005,18 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   // La confiance affichée n'est plus un score arbitraire : c'est la
   // probabilité MESURÉE que l'issue retenue par le modèle soit la bonne,
   // issue d'une régression logistique calibrée sur l'historique.
-  const calibratedConfidenceValue = calibratedConfidence(calibration, separation, agreement);
+  // Probabilité que le marché attribue à l'issue retenue par le modèle :
+  // c'est le meilleur prédicteur hors échantillon de la réussite du pick.
+  const pickKey = simRanked[0].key;
+  const marketPickProbability = market
+    ? clamp(pickKey === 'home' ? devigged.home : pickKey === 'draw' ? devigged.draw : devigged.away, 0, 1)
+    : 0;
+  const calibratedConfidenceValue = calibratedConfidence(
+    calibration,
+    separation,
+    agreement,
+    marketPickProbability
+  );
   const confidenceInterval = probabilityInterval(calibration, calibratedConfidenceValue.probability);
   const confidenceLabel = calibratedConfidenceValue.label;
 

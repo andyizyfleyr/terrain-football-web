@@ -14,9 +14,12 @@
  *
  * Exécution : npm run check:backtest
  */
+import { writeFileSync } from 'node:fs';
 import { BACKTEST_DATASET } from '../app/lib/backtestDataset.ts';
 import { runBacktest } from '../app/lib/backtest.ts';
 import { DEFAULT_CALIBRATION } from '../app/lib/calibrationParams.ts';
+
+const WRITE = process.argv.includes('--write');
 
 let failures = 0;
 function check(label: string, condition: boolean, detail?: string) {
@@ -39,10 +42,21 @@ const withHalfTime = dataset.matches.filter(m => m.htHome !== null && m.htAway !
 check('cotes 1X2 disponibles sur une majorité de matchs', withOdds.length >= dataset.matches.length * 0.5, `${withOdds.length}/${dataset.matches.length}`);
 check('xG disponibles sur une majorité de matchs', withXg.length >= dataset.matches.length * 0.5, `${withXg.length}/${dataset.matches.length}`);
 check('score à la mi-temps disponible', withHalfTime.length >= dataset.matches.length * 0.5, `${withHalfTime.length}/${dataset.matches.length}`);
+// Politique anti-fuite : les totaux de saison (équipes et joueurs) sont
+// volontairement ABSENTS du jeu de données utilisé pour l'ajustement.
 check(
-  'effectifs et compositions documentés',
-  dataset.teams.some(t => (t.players?.length ?? 0) > 0),
+  'aucun total de joueur dans le jeu de données (anti-fuite)',
+  dataset.teams.every(t => (t.players?.length ?? 0) === 0),
   `${dataset.teams.filter(t => (t.players?.length ?? 0) > 0).length} équipes avec joueurs`
+);
+check(
+  'aucune statistique de saison dans le jeu de données (anti-fuite)',
+  dataset.teams.every(t => Object.keys(t.stats || {}).length === 0)
+);
+check(
+  'compositions confirmées documentées',
+  dataset.matches.every(m => m.lineupConfirmedHome === true && m.lineupConfirmedAway === true),
+  `${dataset.matches.filter(m => m.lineupConfirmedHome).length}/${dataset.matches.length}`
 );
 
 console.log('2. Rejeu du moteur (walk-forward)');
@@ -155,6 +169,77 @@ check(
   result.params.effectiveSampleSize > 0,
   `${result.params.effectiveSampleSize}`
 );
+
+if (WRITE && !failures) {
+  // Réécriture des paramètres versionnés à partir de l'ajustement.
+  const p = result.params;
+  const bins = p.confidenceBins
+    .map(b => `    { min: ${b.min}, max: ${b.max}, probability: ${b.probability}, samples: ${b.samples} },`)
+    .join('\n');
+  const content = `/* ------------------------------------------------------------------ */
+/* PARAMÈTRES DE CALIBRATION (ajustés sur backtest walk-forward)       */
+/* ------------------------------------------------------------------ */
+/*
+ * Ces paramètres ne sont PAS des constantes choisies à la main : ils sont
+ * ajustés par \`npm run check:backtest -- --write\` sur le jeu de données de
+ * référence (app/lib/backtestDataset.ts), puis versionnés ici.
+ *
+ * Le jeu de données est un backtest walk-forward : chaque match est rejoué
+ * avec la seule information disponible avant son coup d'envoi.
+ *
+ * Pour ouvrir un nouveau calibrage :
+ *   1. rafraîchir le jeu de données (route /api/backtest-data) ;
+ *   2. lancer \`npm run check:backtest -- --write\` pour réécrire ce fichier ;
+ *   3. vérifier que les métriques ne se dégradent pas.
+ *
+ * Ajustement du ${p.fittedAt.slice(0, 10)} sur ${p.metrics.sampleSize} rencontres
+ * (${p.dataset}).
+ */
+
+import type { CalibrationParams } from './calibration';
+
+export const DEFAULT_CALIBRATION: CalibrationParams = {
+  version: '3.0',
+  modelWeight: ${p.modelWeight},
+  sharpness: ${p.sharpness},
+  valueThreshold: ${p.valueThreshold},
+  effectiveSampleSize: ${p.effectiveSampleSize},
+  logistic: {
+    intercept: ${p.logistic.intercept},
+    separation: ${p.logistic.separation},
+    agreement: ${p.logistic.agreement},
+    marketPick: ${p.logistic.marketPick ?? 0},
+  },
+  confidenceBins: [
+${bins}
+  ],
+  metrics: {
+    sampleSize: ${p.metrics.sampleSize},
+    league: '${p.metrics.league}',
+    period: '${p.metrics.period}',
+    modelLogLoss: ${p.metrics.modelLogLoss},
+    marketLogLoss: ${p.metrics.marketLogLoss},
+    calibratedLogLoss: ${p.metrics.calibratedLogLoss},
+    naiveLogLoss: ${p.metrics.naiveLogLoss},
+    brier: ${p.metrics.brier},
+    accuracy: ${p.metrics.accuracy},
+    valueRoi: ${p.metrics.valueRoi},
+    valueBets: ${p.metrics.valueBets},
+    valueThreshold: ${p.metrics.valueThreshold},
+  },
+  dataset: '${p.dataset}',
+  fittedAt: '${p.fittedAt}',
+  limitations: [
+    'Le backtest rejoue le moteur sans les contributions individuelles des joueurs (xG, xA, minutes) : ces données ne sont pas reconstructibles à la date du match sans introduire de fuite temporelle. Le poids du modèle ajusté est donc une borne INFÉRIEURE de celui du modèle en production.',
+    'La série de marché provient d’un seul fournisseur (Bet365) sur un échantillon de ${p.metrics.sampleSize} rencontres : l’incertitude sur le poids ajusté reste importante (ordre de grandeur : ±0,1).',
+    'Le seuil de « valeur » est dérivé de tranches de 2 points de probabilité : avec ${p.metrics.valueBets} pari(s) sur l’échantillon, ce seuil est indicatif et doit être réajusté sur un échantillon plus large.',
+    'Les totaux de saison (équipes et joueurs) sont exclus de l’ajustement pour éviter toute fuite temporelle.',
+  ],
+};
+`;
+  writeFileSync('app/lib/calibrationParams.ts', content, 'utf-8');
+  console.log('\n     → app/lib/calibrationParams.ts réécrit (version ' + p.version + ')');
+}
 
 console.log('');
 if (failures) {

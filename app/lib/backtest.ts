@@ -31,7 +31,13 @@
  */
 
 import { devigThreeWayDecimal } from './devig';
-import { runQuantitativeAnalyst, type AnalystInput, type AnalystTableRow } from './analystEngine';
+import {
+  runQuantitativeAnalyst,
+  shrunkMean,
+  shrunkRatio,
+  type AnalystInput,
+  type AnalystTableRow,
+} from './analystEngine';
 import { credibleInterval, poissonPmf } from './poissonModels';
 import type { CalibrationParams, CalibrationMetrics, ConfidenceBin, OutcomeProbs } from './calibration';
 import { applyCalibration } from './calibration';
@@ -88,6 +94,9 @@ export type BacktestMatch = {
   unavailableAway: number[];
   startersHome: number[];
   startersAway: number[];
+  /** Compositions officielles publiées avant le coup d'envoi. */
+  lineupConfirmedHome?: boolean;
+  lineupConfirmedAway?: boolean;
   referee?: { yellowPerMatch?: number; yellowAverage?: number; foulsPerMatch?: number; foulsAverage?: number; penaltiesPerMatch?: number } | null;
   weather?: { temperature?: number; windSpeed?: number; precipitation?: number } | null;
   pitch?: { surface?: string } | null;
@@ -106,6 +115,8 @@ export type BacktestSample = {
   outcome: 0 | 1 | 2;
   model: OutcomeProbs;
   market: OutcomeProbs | null;
+  /** Probabilité du marché pour l'issue retenue par le modèle. */
+  marketPick: number;
   naive: OutcomeProbs;
   separation: number;
   agreement: number;
@@ -120,7 +131,14 @@ export type BacktestResult = {
   params: CalibrationParams;
   samples: BacktestSample[];
   calibrationCurve: { bin: string; predicted: number; observed: number; samples: number }[];
-  edgeBuckets: { edge: string; samples: number; roi: number; hitRate: number }[];
+  edgeBuckets: {
+    edge: string;
+    min: number;
+    max: number;
+    samples: number;
+    roi: number;
+    hitRate: number;
+  }[];
   notes: string[];
 };
 
@@ -193,13 +211,12 @@ export function buildWalkForwardInputs(
     const match = matches[i];
     const history = matches.slice(0, i);
 
-    // --- Moyennes de la league sur l'historique -------------------------
-    const leagueHomeGoals = history.length
-      ? history.reduce((a, m) => a + m.homeGoals, 0) / history.length
-      : 1.45;
-    const leagueAwayGoals = history.length
-      ? history.reduce((a, m) => a + m.awayGoals, 0) / history.length
-      : 1.15;
+    // --- Moyennes de la league sur l'historique (rétrécies) -------------
+    // Prior de 5 matchs fictifs : sans cela, un seul match à 3-0 ferait
+    // exploser la moyenne de championnat et rendrait la référence
+    // naïve inutilisable en début de saison.
+    const leagueHomeGoals = shrunkMean(history.map(m => m.homeGoals), 1.45, 5);
+    const leagueAwayGoals = shrunkMean(history.map(m => m.awayGoals), 1.15, 5);
     const leagueTeamGoals = (leagueHomeGoals + leagueAwayGoals) / 2;
 
     // --- Agrégats cumulés par équipe -----------------------------------
@@ -276,19 +293,19 @@ export function buildWalkForwardInputs(
 
     const homeAttackRel =
       homeAgg.homePlayed > 0 && leagueTeamGoals > 0
-        ? homeAgg.homeGoals / homeAgg.homePlayed / leagueTeamGoals
+        ? shrunkRatio(homeAgg.homeGoals / homeAgg.homePlayed, leagueTeamGoals, homeAgg.homePlayed)
         : 1;
     const awayDefenceRel =
       awayAgg.awayPlayed > 0 && leagueTeamGoals > 0
-        ? awayAgg.awayConceded / awayAgg.awayPlayed / leagueTeamGoals
+        ? shrunkRatio(awayAgg.awayConceded / awayAgg.awayPlayed, leagueTeamGoals, awayAgg.awayPlayed)
         : 1;
     const awayAttackRel =
       awayAgg.awayPlayed > 0 && leagueTeamGoals > 0
-        ? awayAgg.awayGoals / awayAgg.awayPlayed / leagueTeamGoals
+        ? shrunkRatio(awayAgg.awayGoals / awayAgg.awayPlayed, leagueTeamGoals, awayAgg.awayPlayed)
         : 1;
     const homeDefenceRel =
       homeAgg.homePlayed > 0 && leagueTeamGoals > 0
-        ? homeAgg.homeConceded / homeAgg.homePlayed / leagueTeamGoals
+        ? shrunkRatio(homeAgg.homeConceded / homeAgg.homePlayed, leagueTeamGoals, homeAgg.homePlayed)
         : 1;
 
     const baseLambdas = {
@@ -347,8 +364,14 @@ export function buildWalkForwardInputs(
         })
         .filter(a => a.id);
 
-    const lineupFor = (ids: number[], snapshot: BacktestTeamSnapshot | undefined) => {
-      if (!ids?.length) return null;
+    const lineupFor = (
+      ids: number[],
+      snapshot: BacktestTeamSnapshot | undefined,
+      confirmed?: boolean
+    ) => {
+      // Compositions confirmées mais identifiants indisponibles dans le
+      // jeu de données anti-fuite : on conserve l'information d'état.
+      if (!ids?.length) return confirmed ? { formation: null, starters: [], confirmed: true } : null;
       return {
         formation: null,
         starters: ids.map(id => {
@@ -433,7 +456,7 @@ export function buildWalkForwardInputs(
         stats: statsFor(homeAgg),
         squad: squadFor(homeSnapshot),
         absences: absencesFor(match.unavailableHome, homeSnapshot),
-        lineup: lineupFor(match.startersHome, homeSnapshot),
+        lineup: lineupFor(match.startersHome, homeSnapshot, match.lineupConfirmedHome),
         formation: null,
         playerStats: {},
       },
@@ -448,7 +471,7 @@ export function buildWalkForwardInputs(
         stats: statsFor(awayAgg),
         squad: squadFor(awaySnapshot),
         absences: absencesFor(match.unavailableAway, awaySnapshot),
-        lineup: lineupFor(match.startersAway, awaySnapshot),
+        lineup: lineupFor(match.startersAway, awaySnapshot, match.lineupConfirmedAway),
         formation: null,
         playerStats: {},
       },
@@ -491,6 +514,19 @@ function brierScore(probs: OutcomeProbs, outcome: 0 | 1 | 2): number {
   const actual = [outcome === 0 ? 1 : 0, outcome === 1 ? 1 : 0, outcome === 2 ? 1 : 0];
   const predicted = [probs.home, probs.draw, probs.away];
   return actual.reduce((acc, a, i) => acc + Math.pow(a - predicted[i], 2), 0);
+}
+
+/** Probabilité du marché pour l'issue la plus probable du modèle. */
+function pickMarketProbability(
+  match: BacktestMatch,
+  model: OutcomeProbs,
+  market: OutcomeProbs | null
+): number {
+  if (!market) return 0;
+  const pick = topPick(model);
+  const value = pick === 0 ? market.home : pick === 1 ? market.draw : market.away;
+  void match;
+  return Math.max(0, Math.min(1, value));
 }
 
 function topPick(probs: OutcomeProbs): 0 | 1 | 2 {
@@ -548,6 +584,7 @@ export function runBacktest(
       naive: naive[i] ?? { home: 1 / 3, draw: 1 / 3, away: 1 / 3 },
       separation: report.confidence.separation,
       agreement: report.confidence.agreement,
+      marketPick: pickMarketProbability(match, report.market.pureModel, devig ? devig.probs : null),
       confidenceScore: report.confidence.score,
       homeGoals: match.homeGoals,
       awayGoals: match.awayGoals,
@@ -571,8 +608,8 @@ export function evaluateSamples(
 
   // --- 1. Température & poids du marché : minimisation de la log-loss ---
   let best: { weight: number; sharpness: number; loss: number } | null = null;
-  for (let sharpness = 0.6; sharpness <= 1.7001; sharpness += 0.05) {
-    for (let weight = 0; weight <= 1.0001; weight += 0.05) {
+  for (let sharpness = 0.4; sharpness <= 2.0001; sharpness += 0.05) {
+    for (let weight = 0; weight <= 1.0001; weight += 0.02) {
       let loss = 0;
       let n = 0;
       for (const sample of samples) {
@@ -695,7 +732,14 @@ function computeEdgeBuckets(
   modelWeight: number,
   sharpness: number
 ): BacktestResult['edgeBuckets'] {
-  const buckets: { edge: string; samples: number; roi: number; hitRate: number }[] = [];
+  const buckets: {
+    edge: string;
+    min: number;
+    max: number;
+    samples: number;
+    roi: number;
+    hitRate: number;
+  }[] = [];
   const edges: { edge: number; roi: number; hit: boolean }[] = [];
 
   for (const sample of samples) {
@@ -729,26 +773,31 @@ function computeEdgeBuckets(
   for (const [min, max, label] of ranges) {
     const slice = edges.filter(e => e.edge >= min && e.edge < max);
     if (!slice.length) {
-      buckets.push({ edge: label, samples: 0, roi: 0, hitRate: 0 });
+      buckets.push({ edge: label, min, max: Number.isFinite(max) ? max : 1, samples: 0, roi: 0, hitRate: 0 });
       continue;
     }
     const roi = slice.reduce((a, e) => a + e.roi, 0) / slice.length;
     const hitRate = slice.filter(e => e.hit).length / slice.length;
-    buckets.push({ edge: label, samples: slice.length, roi: Number(roi.toFixed(4)), hitRate: Number(hitRate.toFixed(4)) });
+    buckets.push({
+      edge: label,
+      min,
+      max: Number.isFinite(max) ? max : 1,
+      samples: slice.length,
+      roi: Number(roi.toFixed(4)),
+      hitRate: Number(hitRate.toFixed(4)),
+    });
   }
 
   return buckets;
 }
 
 function deriveValueThreshold(buckets: BacktestResult['edgeBuckets']): number {
-  // On retient le plus petit seuil à partir duquel le ROI reste positif
-  // sur toutes les tranches supérieures, avec un minimum de 8 paris.
+  // On retient le plus petit seuil (en unités de probabilité) à partir
+  // duquel le ROI reste positif sur toutes les tranches supérieures, avec
+  // un minimum de 8 paris par tranche.
   for (const bucket of buckets) {
     if (!bucket.samples || bucket.samples < 8) continue;
-    if (bucket.roi > 0) {
-      const lower = parseFloat(bucket.edge.split('–')[0]);
-      return Number.isFinite(lower) ? lower : 0.05;
-    }
+    if (bucket.roi > 0) return Number(bucket.min.toFixed(4));
   }
   return 0.08;
 }
@@ -823,41 +872,53 @@ export function fitLogistic(samples: BacktestSample[]): CalibrationParams['logis
     return {
       x1: s.separation,
       x2: s.agreement,
+      x3: s.marketPick ?? 0,
       y: pick === s.outcome ? 1 : 0,
     };
   });
   if (rows.length < 20) {
-    return { intercept: 0, separation: 0, agreement: 0 };
+    return { intercept: 0, separation: 0, agreement: 0, marketPick: 0 };
   }
 
+  // Régression logistique pénalisée (L2) avec coefficients contraints à
+  // être positifs : la séparation du modèle et l'accord avec le marché
+  // ne peuvent, par construction, qu'aider à prédire une réussite. Sans
+  // cette contrainte, un échantillon bruité (109 matchs) produit des
+  // coefficients de signe contraire à la réalité.
   let intercept = 0;
   let b1 = 0;
   let b2 = 0;
-  const learningRate = 0.08;
-  const epochs = 4000;
+  let b3 = 0;
+  const learningRate = 0.15;
+  const epochs = 6000;
+  const lambda = 1.2;
+  const n = rows.length;
 
   for (let epoch = 0; epoch < epochs; epoch++) {
     let g0 = 0;
     let g1 = 0;
     let g2 = 0;
+    let g3 = 0;
     for (const row of rows) {
-      const z = intercept + b1 * row.x1 + b2 * row.x2;
+      const z = intercept + b1 * row.x1 + b2 * row.x2 + b3 * row.x3;
       const p = 1 / (1 + Math.exp(-z));
       const error = p - row.y;
       g0 += error;
       g1 += error * row.x1;
       g2 += error * row.x2;
+      g3 += error * row.x3;
     }
-    const n = rows.length;
     intercept -= (learningRate * g0) / n;
-    b1 -= (learningRate * g1) / n;
-    b2 -= (learningRate * g2) / n;
+    b1 = Math.max(0, b1 - (learningRate * (g1 + lambda * b1)) / n);
+    b2 = Math.max(0, b2 - (learningRate * (g2 + lambda * b2)) / n);
+    b3 = Math.max(0, b3 - (learningRate * (g3 + lambda * b3)) / n);
   }
 
   return {
     intercept: Number(intercept.toFixed(5)),
     separation: Number(b1.toFixed(5)),
     agreement: Number(b2.toFixed(5)),
+    marketPick: Number(b3.toFixed(5)),
   };
 }
 
@@ -910,27 +971,51 @@ export function fitEffectiveSampleSize(
     ).probs;
     const pick = topPick(calibrated);
     const p = pick === 0 ? calibrated.home : pick === 1 ? calibrated.draw : calibrated.away;
-    return { p, outcome: sample.outcome, pick };
+    return { p, probs: calibrated, outcome: sample.outcome, pick };
   });
   if (rows.length < 20) return 60;
 
-  const coverage = (n: number): number => {
-    let inside = 0;
-    for (const row of rows) {
-      const { low, high } = credibleInterval(row.p, n, 0.8);
-      const actual =
-        row.pick === 0 ? row.outcome === 0 : row.pick === 1 ? row.outcome === 1 : row.outcome === 2;
-      if (actual && row.p >= low && row.p <= high) inside += 1;
+  // La concentration effective est calibrée DIRECTEMENT sur la largeur
+  // des intervalles de crédibilité :
+  //
+  //   - on regroupe les matchs par tranche de probabilité annoncée ;
+  //   - pour chaque tranche, on compare la fréquence réellement observée
+  //     à l'intervalle de crédibilité à 80 % calculé autour de la
+  //     probabilité moyenne de la tranche ;
+  //   - on retient la PLUS GRANDE concentration dont la couverture
+  //     empirique reste ≥ 80 %, c'est-à-dire l'intervalle le plus
+  //     étroit qui reste correctement calibré hors échantillon.
+  //
+  // En augmentant n, l'intervalle se resserre : on s'arrête donc au
+  // dernier n qui ne casse pas la couverture nominale.
+  const bins = new Map<number, { n: number; hits: number; sum: number }>();
+  for (const row of rows) {
+    const key = Math.min(9, Math.floor(row.p * 10));
+    const entry = bins.get(key) || { n: 0, hits: 0, sum: 0 };
+    entry.n += 1;
+    entry.sum += row.p;
+    if (row.pick === row.outcome) entry.hits += 1;
+    bins.set(key, entry);
+  }
+  const slices = Array.from(bins.values()).filter(b => b.n >= 5);
+  if (!slices.length) return 60;
+
+  const coverageFor = (n: number): number => {
+    let covered = 0;
+    let total = 0;
+    for (const slice of slices) {
+      const meanP = slice.sum / slice.n;
+      const observed = slice.hits / slice.n;
+      const { low, high } = credibleInterval(meanP, n, 0.8);
+      if (observed >= low && observed <= high) covered += slice.n;
+      total += slice.n;
     }
-    return inside / rows.length;
+    return total ? covered / total : 0;
   };
 
-  let lo = 8;
-  let hi = 4000;
-  for (let i = 0; i < 40; i++) {
-    const mid = (lo + hi) / 2;
-    if (coverage(mid) < 0.8) lo = mid;
-    else hi = mid;
+  let bestN = 1;
+  for (let n = 1; n <= 800; n += 1) {
+    if (coverageFor(n) >= 0.8) bestN = n;
   }
-  return Math.max(8, Math.min(4000, (lo + hi) / 2));
+  return bestN;
 }
