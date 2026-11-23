@@ -58,6 +58,13 @@ check(
   dataset.matches.every(m => m.lineupConfirmedHome === true && m.lineupConfirmedAway === true),
   `${dataset.matches.filter(m => m.lineupConfirmedHome).length}/${dataset.matches.length}`
 );
+// Politique anti-fuite : les titulaires ne sont PAS stockés (identifiants
+// vides) — l'information conservée est le seul drapeau de confirmation.
+check(
+  'aucun titulaire nominal dans le jeu de données (anti-fuite)',
+  dataset.matches.every(m => (m.startersHome?.length ?? 0) === 0 && (m.startersAway?.length ?? 0) === 0),
+  `${dataset.matches.filter(m => (m.startersHome?.length ?? 0) + (m.startersAway?.length ?? 0) > 0).length} matchs avec titulaires`
+);
 
 console.log('2. Rejeu du moteur (walk-forward)');
 const started = Date.now();
@@ -230,7 +237,7 @@ ${bins}
   dataset: '${p.dataset}',
   fittedAt: '${p.fittedAt}',
   limitations: [
-    'Le backtest rejoue le moteur sans les contributions individuelles des joueurs (xG, xA, minutes) : ces données ne sont pas reconstructibles à la date du match sans introduire de fuite temporelle. Le poids du modèle ajusté est donc une borne INFÉRIEURE de celui du modèle en production.',
+    'Le backtest rejoue le moteur sans les contributions individuelles des joueurs (xG, xA, minutes) ni la pondération du onze titulaire : les statistiques de joueur et les titulaires ne sont pas stockés dans le jeu de données de référence (ils seraient collectés après la rencontre). Le poids du modèle ajusté est donc une borne INFÉRIEURE de celui du modèle en production.',
     'La série de marché provient d’un seul fournisseur (Bet365) sur un échantillon de ${p.metrics.sampleSize} rencontres : l’incertitude sur le poids ajusté reste importante (ordre de grandeur : ±0,1).',
     'Le seuil de « valeur » est dérivé de tranches de 2 points de probabilité : avec ${p.metrics.valueBets} pari(s) sur l’échantillon, ce seuil est indicatif et doit être réajusté sur un échantillon plus large.',
     'Les totaux de saison (équipes et joueurs) sont exclus de l’ajustement pour éviter toute fuite temporelle.',

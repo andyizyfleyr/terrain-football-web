@@ -401,7 +401,7 @@ export function AnalystReportView({ analyst }: { analyst: any }) {
       {/* ---------- Les 8 modules ---------- */}
       <section className="analystBlock">
         <div className="subsectionHeading">
-          <span className="sectionKicker">MOTEUR QUANTITATIF V2</span>
+          <span className="sectionKicker">MOTEUR QUANTITATIF V3</span>
           <h3>Les 8 modules d&apos;analyse</h3>
           <p>Chaque module alimente le modèle final ; les indicateurs ci-dessous sont les valeurs réellement utilisées.</p>
         </div>

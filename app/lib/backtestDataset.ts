@@ -14,9 +14,21 @@
  *     rencontres ANTÉRIEURES ;
  *   - totaux de saison (équipes et joueurs) exclus de l'ajustement car
  *     collectés après coup ;
- *   - absences et confirmation des compositions conservées (information
+ *   - absences et CONFIRMATION des compositions conservées (information
  *     disponible avant le coup d'envoi) ;
  *   - cotes relevées avant le coup d'envoi, fournisseur unique (Bet365).
+ *
+ * COMPOSITIONS ET JOUEURS — ce qui est stocké, et pourquoi c'est peu :
+ *   - le drapeau « compositions confirmées » est stocké pour les 109
+ *     rencontres (109/109) ;
+ *   - les TITULAIRES ne sont PAS stockés (identifiants vides) et les
+ *     EFFECTIFS nominatifs non plus : les statistiques de joueur
+ *     (xG, xA, minutes, note) sont des instantanés collectés après la
+ *     rencontre, donc inutilisables sans introduire une fuite
+ *     temporelle. Le moteur rejoué en backtest joue donc sans la
+ *     pondération du onze titulaire ;
+ *   - les joueurs ABSENTS sont conservés (47/109) : information annoncée
+ *     avant le coup d'envoi.
  *
  * Couverture : cotes 109/109 · xG 109/109 · score à la mi-temps 101/109 ·
  * compositions confirmées 109/109 · absences 47/109 · arbitre 109/109 ·

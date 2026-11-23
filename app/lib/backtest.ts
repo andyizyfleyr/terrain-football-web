@@ -15,10 +15,39 @@
  *     partir des SEULEMENTS rencontres antérieures ;
  *   - les instantanés d'équipe (totaux de saison, statistiques de joueurs)
  *     sont EXCLUS de l'ajustement : ils sont courants au moment de la
- *     collecte etnous donneraient un avantage rétrospectif indu ;
- *   - les absences et les compositions CONFIRMÉES sont conservées : elles
- *     sont connues avant le coup d'envoi (annonce des compositions) ;
+ *     collecte et nous donneraient un avantage rétrospectif indu ;
+ *   - les absences et l'INDICATEUR « compositions confirmées » sont
+ *     conservés : ils sont connus avant le coup d'envoi (annonce des
+ *     compositions) ;
  *   - les cotes utilisées sont celles relevées avant le coup d'envoi.
+ *
+ * COMPOSITIONS ET JOUEURS : CE QUE LE JEU DE DONNÉES CONSERVE — ET CE
+ * QU'IL NE CONSERVE PAS. La distinction est volontaire et documentée :
+ *
+ *   CONSERVÉ (disponible avant le coup d'envoi)
+ *     - la confirmation des compositions (drapeau `lineupConfirmed*`) ;
+ *     - la liste des joueurs ABSENTS (`unavailable*`), annoncée par le club
+ *       ou loweek avant la rencontre ;
+ *     - la structure du onze quand les identifiants sont disponibles.
+ *
+ *   NON CONSERVÉ (fuite temporelle ou reconstruction impossible)
+ *     - les EFFECTIFS nominatifs (`teams[].players`) et les statistiques
+ *       de joueur (xG, xA, minutes, note, valeur marchande) : ce sont des
+ *       instantanés « au moment de la collecte », calculés sur des
+ *       rencontres jouées APRÈS la rencontre prédite ;
+ *     - les identifiants de titulaires (`startersHome` / `startersAway`)
+ *       dans le jeu de données de référence : sans la fiche joueur
+ *       correspondante (valeur, note, position), un identifiant isolé
+ *       n'apporte rien au moteur et$rouvrirait la porte à des
+ *       agrégats de joueur postérieurs au match ;
+ *     - les totaux de saison des équipes (`teams[].stats`).
+ *
+ *   CONSÉQUENCE, ÉNONCÉE ET MESURÉE : le backtest rejoue un moteur
+ *   allégé (module « effectif » sans pondération du onze titulaire),
+ *   dont le poids de marché ajusté est donc une borne INFÉRIEURE de
+ *   celui du moteur de production. Le rééquilibrage obtenu reste
+ *   applicable en production ; il ne doit simplement pas être lu comme
+ *   le réglage optimal du moteur complet.
  *
  * Les métriques produites :
  *   - log-loss multi-classes (3 issues) : qualité probabiliste ;
@@ -62,8 +91,17 @@ export type BacktestPlayer = {
 export type BacktestTeamSnapshot = {
   id: number;
   name: string;
-  /** Statistiques d'équipe (moyennes par match) utilisées par le moteur. */
+  /**
+   * Statistiques d'équipe (moyennes par match) utilisées par le moteur.
+   * VOLONTAIREMENT VIDES dans le jeu de données de référence : ce sont des
+   * totaux de saison collectés après coup (fuite temporelle).
+   */
   stats?: Record<string, number>;
+  /**
+   * Fiches joueurs. VOLONTAIREMENT VIDES dans le jeu de données de
+   * référence : les statistiques individuelles (xG, xA, minutes, note)
+   * sont des instantanés postérieurs à la rencontre prédite.
+   */
   players?: BacktestPlayer[];
 };
 
@@ -90,8 +128,16 @@ export type BacktestMatch = {
   awayXgot: number | null;
   odds: { home: number; draw: number; away: number } | null;
   provider: string | null;
+  /** Joueurs absents annoncés avant le coup d'envoi (information publique). */
   unavailableHome: number[];
   unavailableAway: number[];
+  /**
+   * Identifiants de titulaires. VOLONTAIREMENT VIDES dans le jeu de
+   * données de référence : sans la fiche joueur correspondante, un
+   * identifiant isolé n'apporte rien et rouvrirait la porte à des
+   * agrégats de joueur collected après la rencontre (fuite temporelle).
+   * L'information conservée est le drapeau `lineupConfirmed*` ci-dessous.
+   */
   startersHome: number[];
   startersAway: number[];
   /** Compositions officielles publiées avant le coup d'envoi. */

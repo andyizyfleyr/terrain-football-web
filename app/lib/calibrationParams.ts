@@ -54,9 +54,9 @@ export const DEFAULT_CALIBRATION: CalibrationParams = {
     valueThreshold: 0.02,
   },
   dataset: 'eng.1 · 2026-08-21 → 2026-11-22',
-  fittedAt: '2026-11-23T20:03:33.113Z',
+  fittedAt: '2026-11-23T20:11:29.372Z',
   limitations: [
-    'Le backtest rejoue le moteur sans les contributions individuelles des joueurs (xG, xA, minutes) : ces données ne sont pas reconstructibles à la date du match sans introduire de fuite temporelle. Le poids du modèle ajusté est donc une borne INFÉRIEURE de celui du modèle en production.',
+    'Le backtest rejoue le moteur sans les contributions individuelles des joueurs (xG, xA, minutes) ni la pondération du onze titulaire : les statistiques de joueur et les titulaires ne sont pas stockés dans le jeu de données de référence (ils seraient collectés après la rencontre). Le poids du modèle ajusté est donc une borne INFÉRIEURE de celui du modèle en production.',
     'La série de marché provient d’un seul fournisseur (Bet365) sur un échantillon de 109 rencontres : l’incertitude sur le poids ajusté reste importante (ordre de grandeur : ±0,1).',
     'Le seuil de « valeur » est dérivé de tranches de 2 points de probabilité : avec 51 pari(s) sur l’échantillon, ce seuil est indicatif et doit être réajusté sur un échantillon plus large.',
     'Les totaux de saison (équipes et joueurs) sont exclus de l’ajustement pour éviter toute fuite temporelle.',
