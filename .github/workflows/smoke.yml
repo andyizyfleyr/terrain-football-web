@@ -1,0 +1,44 @@
+name: Production
+
+# Le test de fumée appelle la PRODUCTION (API + site) et vérifie que les
+# invariants tiennent : forme ESPN non vide, différence de buts réelle,
+# calendrier servi, analyse complète, fiche de match rendue.
+#
+# C'est le filet de sécurité des ruptures silencieuses : un format ESPN
+# qui change, une limitation de débit qui vide la forme, une route du
+# front en 404 — tout cela échoue ici en quelques minutes au lieu
+# d'attendre qu'un utilisateur (ou une session de débogage) le remarque.
+#
+# Aucun déploiement Vercel n'est déclenché : ce contrôle consomme le
+# quota GitHub Actions, pas celui de Vercel.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Chaque jour à 06:17 UTC (08:17 à Cotonou) — heure creuse pour ESPN.
+    - cron: '17 6 * * *'
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - 'app/**'
+      - 'scripts/smoke-production.mjs'
+      - '.github/workflows/smoke.yml'
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Test de fumée de la production
+        env:
+          API_BASE: ${{ vars.API_BASE || 'https://terrain-football-api.vercel.app' }}
+          WEB_BASE: ${{ vars.WEB_BASE || 'https://terrain-football-web.vercel.app' }}
+        run: node scripts/smoke-production.mjs

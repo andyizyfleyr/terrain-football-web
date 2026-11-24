@@ -93,12 +93,31 @@ ESPN impose deux contraintes que l'ingestion doit respecter :
 
 ```bash
 python3 backend/test_ingestion.py   # 46 contrôles d'ingestion (hors réseau)
-python3 backend/test_api.py        # 18 contrôles de contrat et de repli
+python3 backend/test_api.py        # 22 contrôles de contrat et de repli
+npm run smoke                      # 33 contrôles de la PRODUCTION (réseau)
 ```
 
 Les contrôles sont hors réseau : ils valident la logique de collecte
 (fenêtre de forme, splits, libellés, repli en l'absence de source) et le
 contrat HTTP (analyse complète, repli moteur injoignable, journée vide).
+
+### Test de fumée de la production
+
+`scripts/smoke-production.mjs` (alias `npm run smoke`) appelle la
+production et vérifie les invariants : service vivant, moteur joignable,
+16 marchés, 10 000 simulations, catalogue des compétitions, journée de
+calendrier servie, **forme non vide**, **différence de buts réelle**,
+historique d'équipe alimenté, bloc analyst présent, diagnostic ESPN sans
+erreur, accueil rendu et fiche de match rendue (pas d'écran d'erreur
+Next.js).
+
+Il est exécuté automatiquement par GitHub Actions
+(`.github/workflows/smoke.yml`) : à chaque push sur `main`, une fois par
+jour, et à la demande (« Run workflow »). Aucun déploiement Vercel n'est
+déclenché par ce contrôle — il consomme le quota GitHub Actions, pas
+celui de Vercel.
+
+Bases : `API_BASE` et `WEB_BASE` (par défaut les URL de production).
 
 ## Déploiement (Vercel)
 
