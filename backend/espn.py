@@ -234,16 +234,47 @@ def _int(value: Any) -> int:
         return 0
 
 
-async def fetch_day_matches(
+async def fetch_day_scoreboard(
     client: httpx.AsyncClient, league: str, date_compact: str
-) -> List[Dict[str, Any]]:
-    """Matchs d'une journée (scoreboard ESPN)."""
+) -> Dict[str, Any]:
+    """Charge utile brute du scoreboard ESPN pour une date.
+
+    Renvoie un dict vide si ESPN refuse le slug (HTTP 400 sur une ligue
+    inconnue) : l'appelant distingue ainsi « pas de match ce jour-la »
+    de « cette ligue n'existe pas ».
+    """
     league = resolve_league_slug(league)
     url = f"{ESPN_BASE}/site/v2/sports/soccer/{league}/scoreboard?dates={date_compact}"
     payload = await fetch_json(client, url)
-    if not payload:
-        return []
+    return payload if isinstance(payload, dict) else {}
 
+
+def season_calendar(payload: Dict[str, Any]) -> List[str]:
+    """Journees de la saison telles que publiees par ESPN.
+
+    Le scoreboard de n'importe quelle date de la saison publie la liste
+    des journees (`leagues[0].calendar`). Elle est decisive : une ligue
+    peut etre en pause (coupe du monde, trêve) et ne servir aucun match
+    pendant plusieurs semaines, sans etre invalide. La calendrier
+    permet de distinguer les deux cas — et de retrouver une journee qui
+    a vraiment eu lieu.
+    """
+    leagues = payload.get("leagues") or []
+    if not leagues:
+        return []
+    calendar = leagues[0].get("calendar") or []
+    days: List[str] = []
+    for entry in calendar:
+        day = str(entry)[:10].replace("-", "")
+        if len(day) == 8 and day.isdigit():
+            days.append(day)
+    return sorted(set(days))
+
+
+def _events_from_scoreboard(
+    payload: Dict[str, Any], league: str
+) -> List[Dict[str, Any]]:
+    """Matchs normalises depuis la charge utile brute du scoreboard ESPN."""
     matches: List[Dict[str, Any]] = []
     for event in payload.get("events", []) or []:
         competitions = event.get("competitions") or []
@@ -275,25 +306,38 @@ async def fetch_day_matches(
     return matches
 
 
+async def fetch_day_matches(
+    client: httpx.AsyncClient, league: str, date_compact: str
+) -> List[Dict[str, Any]]:
+    """Matchs d'une journée (scoreboard ESPN)."""
+    payload = await fetch_day_scoreboard(client, league, date_compact)
+    if not payload:
+        return []
+    return _events_from_scoreboard(payload, resolve_league_slug(league))
+
+
 # --------------------------------------------------------------------------
 async def fetch_day_fixtures(
     client: httpx.AsyncClient, league: str, date_compact: str
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
     """Matchs d'une journee au format du front, avec cache court.
 
-    Le calendrier du front demande une journee par jour du mois : sans
-    cache, ESPN recevrait une trentaine de scoreboards d'affilee. Le cache
-    est court (5 min) car les scores changent pendant la journee.
+    Renvoie les matchs de la journee (`events`) et le calendrier de la
+    saison (`calendar`, journees publiees par ESPN). Le calendrier
+    accompagne le scoreboard dans la meme reponse ESPN : le servir ne
+    coute donc aucune requete supplementaire.
+
+    Le cache est court (5 min) car les scores changent pendant la journee.
     """
     league = resolve_league_slug(league)
     key = f"{league}:{date_compact}"
     cached = DAY_CACHE.get(key)
     if cached and (time.time() - cached["at"]) < DAY_CACHE_TTL:
-        return cached["events"]
+        return cached["payload"]
 
-    matches = await fetch_day_matches(client, league, date_compact)
+    payload = await fetch_day_scoreboard(client, league, date_compact)
     events: List[Dict[str, Any]] = []
-    for match in matches:
+    for match in _events_from_scoreboard(payload, league):
         home = match.get("home") or {}
         away = match.get("away") or {}
         events.append(
@@ -309,8 +353,9 @@ async def fetch_day_fixtures(
                 "completed": bool((match.get("status") or {}).get("completed")),
             }
         )
-    DAY_CACHE[key] = {"at": time.time(), "events": events}
-    return events
+    result = {"events": events, "calendar": season_calendar(payload)}
+    DAY_CACHE[key] = {"at": time.time(), "payload": result}
+    return result
 
 
 # Forme récente (schedule d'équipe)

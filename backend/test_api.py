@@ -158,12 +158,53 @@ async def fake_day_matches(client, league, date_compact):
     return list(DAY_EVENTS)
 
 
-espn_module.fetch_day_matches = fake_day_matches
+# La couche d'ingestion lit maintenant le scoreboard ESPN brut : c'est ce
+# payload qui porte a la fois les matchs et le calendrier de la saison.
+async def fake_day_scoreboard(client, league, date_compact):
+    return {
+        "leagues": [
+            {
+                "calendar": [
+                    "2026-08-07T07:00Z",
+                    "2026-11-21T07:00Z",
+                    "2026-11-22T07:00Z",
+                    "2026-11-27T08:00Z",
+                ]
+            }
+        ],
+        "events": [
+            {
+                "id": "401879234",
+                "date": "2026-11-22T14:00Z",
+                "status": {"type": {"state": "post", "completed": True, "detail": "FT"}},
+                "competitions": [
+                    {
+                        "venue": {"fullName": "The MKM Stadium", "address": {"city": "Hull"}},
+                        "competitors": [
+                            {
+                                "homeAway": "home",
+                                "team": {"id": "306", "displayName": "Hull City", "shortDisplayName": "HUL"},
+                                "score": "2",
+                            },
+                            {
+                                "homeAway": "away",
+                                "team": {"id": "331", "displayName": "Brighton", "shortDisplayName": "BHA"},
+                                "score": "0",
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+
+espn_module.fetch_day_scoreboard = fake_day_scoreboard
 espn_module.DAY_CACHE.clear()
 with TestClient(api.app) as client:
     leagues_payload = client.get("/api/leagues").json()
     fixtures_payload = client.get("/api/fixtures?league=eng.1&date=2026-11-22").json()
-espn_module.fetch_day_matches = espn_module.fetch_day_matches
+espn_module.fetch_day_scoreboard = espn_module.fetch_day_scoreboard
 espn_module.DAY_CACHE.clear()
 
 catalog = leagues_payload.get("leagues", [])
@@ -183,12 +224,36 @@ check(
     and events[0]["away"].get("name") == "Brighton",
     str(events[:1]),
 )
+# Le calendrier de saison permet de retrouver une journee reellement
+# jouee quand la ligue est en pause : sans lui, une treve de trois
+# semaines ferait croire a une ligue cassee.
+calendar = fixtures_payload.get("calendar", [])
+check(
+    "calendrier de saison expose",
+    calendar == ["20260807", "20261121", "20261122", "20261127"],
+    str(calendar),
+)
+check(
+    "calendrier trie et sans doublon",
+    calendar == sorted(set(calendar)),
+    str(calendar),
+)
 
 print("7. Auto-contrôle de production (/api/smoke)")
 
 
 async def fake_fixtures(client, league, date_compact):
-    return [{"id": "401879234", "name": "Hull City - Brighton", "home": {"name": "Hull City"}, "away": {"name": "Brighton"}}]
+    return {
+        "events": [
+            {
+                "id": "401879234",
+                "name": "Hull City - Brighton",
+                "home": {"name": "Hull City"},
+                "away": {"name": "Brighton"},
+            }
+        ],
+        "calendar": ["20261122"],
+    }
 
 
 async def fake_base(league, date_compact, match_ids=None):

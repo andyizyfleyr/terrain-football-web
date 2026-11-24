@@ -110,11 +110,24 @@ async def fixtures(
     league: str = Query("eng.1"),
     date: str = Query(""),
 ) -> JSONResponse:
-    """Matchs d'une journee au format du calendrier (front)."""
+    """Matchs d'une journee au format du calendrier (front).
+
+    `calendar` liste les journees de la saison publiees par ESPN. Il
+    permet au client de retrouver une journee reellement jouee, y
+    compris quand la ligue est en pause (coupe du monde, treve) : le
+    calendrier et les matchs sont servis par la meme requete ESPN.
+    """
     date_compact = _normalize_date(date)
     async with _client() as client:
-        events = await fetch_day_fixtures(client, league, date_compact)
-    return JSONResponse({"league": league, "date": date_compact, "events": events})
+        result = await fetch_day_fixtures(client, league, date_compact)
+    return JSONResponse(
+        {
+            "league": league,
+            "date": date_compact,
+            "events": result.get("events", []),
+            "calendar": result.get("calendar", []),
+        }
+    )
 
 
 @app.get("/api/smoke")
@@ -145,7 +158,8 @@ async def smoke() -> JSONResponse:
         day = today - timedelta(days=back)
         date_compact = day.strftime("%Y%m%d")
         async with _client() as client:
-            events = await fetch_day_fixtures(client, "eng.1", date_compact)
+            result = await fetch_day_fixtures(client, "eng.1", date_compact)
+        events = result.get("events", [])
         if events:
             reference = events[0]
             reference_date = date_compact
