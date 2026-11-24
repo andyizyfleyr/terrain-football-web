@@ -152,6 +152,10 @@ console.log('3b. Couverture de chaque compétition cataloguée');
   const leagues = res.body?.leagues || [];
   const today = new Date();
 
+  // Un catalogue vide ne doit pas passer pour une couverture complète :
+  // sans compétition à tester, la boucle ne testerait rien.
+  check('catalogue exploitable pour la couverture', leagues.length > 0, `${leagues.length} compétitions`);
+
   // Fenêtre de 14 jours : couvre au moins une journée de jeu pour chaque
   // Division, y compris les calendriers à décalage horaire (MLS, Liga MX).
   const dates = [];
@@ -171,7 +175,7 @@ console.log('3b. Couverture de chaque compétition cataloguée');
   }
   check(
     'toutes les compétitions cataloguées servent un calendrier',
-    empty.length === 0,
+    leagues.length > 0 && empty.length === 0,
     `sans match sur 14 jours : ${empty.join(', ')}`
   );
 }
