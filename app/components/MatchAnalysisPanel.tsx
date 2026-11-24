@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch, describeFailure, type ClientError } from '../lib/clientApi';
 import { Fixture, isFixtureFinished, longDate, Team, timeOf } from '../lib/terrain';
 import { TeamBadge } from './TeamBadge';
@@ -160,6 +160,46 @@ export function MatchAnalysisPanel({
   const [loaderElapsed, setLoaderElapsed] = useState(0);
   const [loaderProgress, setLoaderProgress] = useState(0);
   const loaderStartRef = useRef<number>(Date.now());
+  const panelRef = useRef<HTMLElement | null>(null);
+
+  /**
+   * Sur mobile, un onglet peut être très long : en changeant d'onglet on
+   * ramène l'utilisateur en haut du panneau pour qu'il ne reste pas au
+   * milieu d'un contenu qui vient de changer.
+   */
+  const selectTab = useCallback((next: typeof tab) => {
+    setTab(next);
+    if (typeof window === 'undefined' || !window.matchMedia('(max-width: 760px)').matches) return;
+    const el = panelRef.current;
+    if (!el) return;
+    const top = el.getBoundingClientRect().top + window.scrollY - 4;
+    window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  }, []);
+
+  // Le sommaire du rapport se cale sous la barre d'onglets collante :
+  // sa position dépend donc de la hauteur réelle de cette barre.
+  const [stickyHeight, setStickyHeight] = useState(0);
+  useEffect(() => {
+    const el = panelRef.current?.querySelector<HTMLElement>('.analysisSticky');
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const update = () => setStickyHeight(el.getBoundingClientRect().height);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [analysisLoading, fixture]);
+
+  // Le changement d'onglet doit aussi remettre la barre d'onglets à gauche.
+  const tabsRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const bar = tabsRef.current;
+    if (!bar) return;
+    const active = bar.querySelector<HTMLElement>('button[aria-selected="true"]');
+    if (!active) return;
+    if (active.offsetLeft < bar.scrollLeft || active.offsetLeft + active.offsetWidth > bar.scrollLeft + bar.clientWidth) {
+      bar.scrollTo({ left: Math.max(0, active.offsetLeft - 12), behavior: 'smooth' });
+    }
+  }, [tab, analysisLoading]);
 
   // Séquence d'analyse de 10 secondes minimum : elle démarre à l'ouverture du match
   // et tourne en parallèle de la récupération des données.
@@ -280,7 +320,12 @@ export function MatchAnalysisPanel({
   const awayAbsenceCount = Array.isArray(factors.blessures?.awayPlayers) ? factors.blessures.awayPlayers.length : null;
 
   return (
-    <section className="analysisPanel" id="analyse">
+    <section
+      className="analysisPanel"
+      id="analyse"
+      ref={panelRef}
+      style={{ ['--m-analysis-sticky' as any]: `${Math.round(stickyHeight)}px` }}
+    >
       {/* En-tête collant : score rapide + onglets, toujours visibles sur mobile */}
       <div className="analysisSticky">
         {fixture && (
@@ -305,7 +350,7 @@ export function MatchAnalysisPanel({
         )}
 
         {!showLoader && (
-          <div className="analysisTabs" role="tablist" aria-label="Sections de l’analyse">
+          <div className="analysisTabs" role="tablist" aria-label="Sections de l’analyse" ref={tabsRef}>
             {([
               ['resume', 'Vue d’ensemble'],
               ['pronostics', 'Pronostics'],
@@ -318,7 +363,7 @@ export function MatchAnalysisPanel({
                 role="tab"
                 aria-selected={tab === id}
                 className={tab === id ? 'tabActive' : ''}
-                onClick={() => setTab(id)}
+                onClick={() => selectTab(id)}
               >
                 {label}
                 {id === 'pronostics' && analyst?.pronostics ? (
@@ -337,7 +382,7 @@ export function MatchAnalysisPanel({
         )}
       </div>
 
-      <div className="analysisTopline">
+      <div className={`analysisTopline ${fixture ? 'hasFixture' : ''}`}>
         <div className="analysisToplineLeft">
           {onClose && (
             <button type="button" className="backLinkButton" onClick={onClose}>
@@ -509,7 +554,7 @@ export function MatchAnalysisPanel({
                       <span>temps pondéré e^(−ξΔt)</span>
                     </div>
                   </div>
-                  <button type="button" onClick={() => setTab('analyste')}>
+                  <button type="button" onClick={() => selectTab('analyste')}>
                     Rapport complet <span>→</span>
                   </button>
                 </div>
@@ -553,7 +598,7 @@ export function MatchAnalysisPanel({
                 <div className="squadQuickBanner">
                   <div className="squadQuickHeader">
                     <span>✚ EFFECTIFS & ABSENCES</span>
-                    <button type="button" onClick={() => setTab('facteurs')}>
+                    <button type="button" onClick={() => selectTab('facteurs')}>
                       Voir les 8 facteurs →
                     </button>
                   </div>
@@ -691,7 +736,7 @@ export function MatchAnalysisPanel({
                   </b>
                   <p>{vigilance.reasons?.[0] || 'Aucun signal majeur détecté avec les données disponibles.'}</p>
                 </div>
-                <button onClick={() => setTab('vigilance')}>
+                <button onClick={() => selectTab('vigilance')}>
                   Détails <span>→</span>
                 </button>
               </div>

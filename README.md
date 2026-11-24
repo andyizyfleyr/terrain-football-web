@@ -179,3 +179,23 @@ de production (236 rencontres) ne pouvait pas révéler :
 - `backend/espn.py` : caches bornés (calendrier, journées, saisons).
 - Les données manquantes ne sont jamais remplacées par une supposition :
   l’absence est signalée explicitement à l’utilisateur.
+
+## Interface mobile
+
+La feuille de styles `app/mobile.css` est chargée **après** `globals.css` et ne
+cible que les écrans étroits (`screen and (max-width: 760px)`) ainsi que
+l'impression. Le rendu desktop n'est pas modifié.
+
+- **Bloc collant** : compétition, mois (pas à pas) et onglets de statut restent
+  accessibles pendant le défilement. Sa hauteur réelle est mesurée et exposée
+  en `--m-sticky-h`, ce qui cale les en-têtes de journée et les ancres.
+- **Feuille de filtres** : compétition, mois, statut et recherche dans une seule
+  modale bas d'écran (fermeture par la poignée, la croix, le fond ou `Échap`).
+- **Fiche de rencontre** : bandeau de score compact et collant, onglets en
+  pastilles défilantes, changement d'onglet qui ramène en haut du panneau, et
+  sommaire du rapport Analyste qui reste accroché sous les onglets.
+- **Lisibilité** : textes ≥ 11 px, cibles tactiles ≥ 34 px, champs de saisie à
+  16 px (empêche le zoom automatique d'iOS), `env(safe-area-inset-*)` pour les
+  encoches, respect de `prefers-reduced-motion`.
+- **Cartes de match** : sur mobile, la grille passe en deux zones (horaire +
+  statut en haut, équipes en lignes « feuille de match » avec le score aligné).

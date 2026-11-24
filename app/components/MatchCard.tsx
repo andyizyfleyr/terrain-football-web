@@ -16,8 +16,13 @@ type MatchCardProps = {
 };
 
 /**
- * Carte de rencontre redessinée : rail horaire à gauche, équipes au centre,
- * résultat et action à droite. Compacte sur mobile, lisible sur desktop.
+ * Carte de rencontre : rail horaire à gauche, équipes au centre,
+ * résultat et action à droite.
+ *
+ * Le balisage est commun aux deux mises en page. Sur mobile, `mobile.css`
+ * réorganise les zones en grille (`rail` / `side` / `body`) et transforme
+ * les équipes en lignes de type « feuille de match » avec le score aligné
+ * à droite — la grille desktop n'est pas touchée.
  */
 export function MatchCard({ fixture, href, onOpen, highlighted, vigilance, tags }: MatchCardProps) {
   const finished = isFixtureFinished(fixture);
@@ -40,10 +45,12 @@ export function MatchCard({ fixture, href, onOpen, highlighted, vigilance, tags 
         <span className="matchCardTeam">
           <TeamBadge team={fixture.home} size={30} />
           <b>{fixture.home?.name}</b>
+          {finished ? <span className="matchCardTeamScore">{fixture.home?.score}</span> : null}
         </span>
         <span className="matchCardTeam">
           <TeamBadge team={fixture.away} size={30} />
           <b>{fixture.away?.name}</b>
+          {finished ? <span className="matchCardTeamScore">{fixture.away?.score}</span> : null}
         </span>
         <span className="matchCardVenue">{fixture.venue || 'Lieu non renseigné'}</span>
         {badges.length > 0 && (

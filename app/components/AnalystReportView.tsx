@@ -131,6 +131,17 @@ export function AnalystReportView({
 
   return (
     <div className="analystArea">
+      {/* ---------- Sommaire (mobile : pastilles défilantes) ---------- */}
+      <nav className="analystToc" aria-label="Sommaire du rapport">
+        <a href="#analyst-verdict">Verdict</a>
+        <a href="#analyst-marche">Modèle &amp; marché</a>
+        <a href="#analyst-calibration">Validation</a>
+        <a href="#analyst-modules">8 modules</a>
+        <a href="#analyst-contexte">Contexte</a>
+        <a href="#analyst-simulation">Simulation</a>
+        <a href="#analyst-pronostics">Pronostics</a>
+      </nav>
+
       {/* ---------- Barre d'impression (écran uniquement) ---------- */}
       <div className="printToolbar">
         <span className="printToolbarHint">
@@ -163,7 +174,7 @@ export function AnalystReportView({
       </header>
 
       {/* ---------- Verdict & confiance ---------- */}
-      <section className="analystVerdict">
+      <section className="analystVerdict" id="analyst-verdict">
         <div className="analystConfidence">
           <span>INDICE DE CONFIANCE</span>
           <b>
@@ -192,7 +203,7 @@ export function AnalystReportView({
       </section>
 
       {/* ---------- Modèle pur vs marché ---------- */}
-      <section className="analystBlock">
+      <section className="analystBlock" id="analyst-marche">
         <div className="subsectionHeading">
           <span className="sectionKicker">MODULE 06 · CALIBRATION BAYÉSIENNE</span>
           <h3>Modèle pur, marché et valeur détectée</h3>
@@ -379,7 +390,7 @@ export function AnalystReportView({
       ) : null}
 
       {/* ---------- Validation empirique & incertitude ---------- */}
-      <section className="analystBlock">
+      <section className="analystBlock" id="analyst-calibration">
         <div className="subsectionHeading">
           <span className="sectionKicker">VALIDATION EMPIRIQUE · MOTEUR V3</span>
           <h3>Calibrage hors échantillon, métriques et marges d&apos;incertitude</h3>
@@ -562,7 +573,7 @@ export function AnalystReportView({
       </section>
 
       {/* ---------- Les 8 modules ---------- */}
-      <section className="analystBlock">
+      <section className="analystBlock" id="analyst-modules">
         <div className="subsectionHeading">
           <span className="sectionKicker">MOTEUR QUANTITATIF V3</span>
           <h3>Les 8 modules d&apos;analyse</h3>
@@ -645,7 +656,7 @@ export function AnalystReportView({
       </section>
 
       {/* ---------- Calendrier & contexte ---------- */}
-      <section className="analystBlock">
+      <section className="analystBlock" id="analyst-contexte">
         <div className="subsectionHeading">
           <span className="sectionKicker">MODULE 07 · CONTEXTE</span>
           <h3>Congestion, calendrier européen, enjeux, arbitre & météo</h3>
@@ -781,7 +792,7 @@ export function AnalystReportView({
       </section>
 
       {/* ---------- Monte-Carlo ---------- */}
-      <section className="analystBlock">
+      <section className="analystBlock" id="analyst-simulation">
         <div className="subsectionHeading">
           <span className="sectionKicker">MODULE 08 · MONTE-CARLO</span>
           <h3>
@@ -845,7 +856,7 @@ export function AnalystReportView({
 
       {/* ---------- Pronostics dérivés (lecture de la simulation) ---------- */}
       {analyst.pronostics ? (
-        <section className="analystBlock analystPronosticsBlock">
+        <section className="analystBlock analystPronosticsBlock" id="analyst-pronostics">
           <div className="subsectionHeading">
             <span className="sectionKicker">MARCHÉS DÉRIVÉS · LECTURE DE LA SIMULATION</span>
             <h3>{marketCount} pronostics dérivés du même Monte-Carlo que le score final</h3>
