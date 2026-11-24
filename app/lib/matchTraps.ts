@@ -136,15 +136,21 @@ export function detectMatchTraps(input: {
   // surestimerait le repos des matchs du soir (4 h de plus = +0,17 jour).
   const daysSince = (dates: string[] | undefined, kickoff: string | null): number | null => {
     if (!dates || !dates.length || !kickoff) return null;
-    const latest = dates.slice().sort().reverse()[0];
     const kickoffDay = kickoff.slice(0, 10);
-    const latestDay = latest.slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(kickoffDay) || !/^\d{4}-\d{2}-\d{2}$/.test(latestDay)) {
-      return null;
-    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(kickoffDay)) return null;
+    // Seules les rencontres STRICTEMENT antérieures au coup d'envoi
+    // comptent. Le tableau peut contenir des matchs à venir : prendre
+    // la date maximale donnerait un repos négatif (-182 jours en
+    // production) et laisserait fuiter l'information future.
+    const previous = dates
+      .map(date => date.slice(0, 10))
+      .filter(date => /^\d{4}-\d{2}-\d{2}$/.test(date) && date < kickoffDay)
+      .sort()
+      .reverse();
+    if (!previous.length) return null;
     const difference =
-      (Date.parse(`${kickoffDay}T00:00:00Z`) - Date.parse(`${latestDay}T00:00:00Z`)) / 86_400_000;
-    return Number.isFinite(difference) ? difference : null;
+      (Date.parse(`${kickoffDay}T00:00:00Z`) - Date.parse(`${previous[0]}T00:00:00Z`)) / 86_400_000;
+    return Number.isFinite(difference) && difference >= 0 ? difference : null;
   };
   const restHome = daysSince(input.homeRecentDates, input.kickoffIso ?? null);
   const restAway = daysSince(input.awayRecentDates, input.kickoffIso ?? null);
