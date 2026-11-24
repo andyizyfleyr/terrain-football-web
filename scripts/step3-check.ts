@@ -115,6 +115,24 @@ console.log('2. Avertissements « match piège »');
     (traps.find(t => t.id === 'new-coach')?.detail.includes('indisponible') ||
       traps.find(t => t.id === 'new-coach')?.label.includes('indisponible')));
 
+  // Un tableau de matchs peut contenir des rencontres à venir : le repos
+  // doit être mesuré depuis la dernière rencontre ANTÉRIEURE, jamais depuis
+  // la date maximale (qui donnerait un repos négatif).
+  const withFuture = detectMatchTraps({
+    league: 'esp.1',
+    homeName: 'Real Madrid',
+    awayName: 'Sevilla',
+    homeRecentDates: ['2026-11-10', '2027-05-30'],
+    awayRecentDates: ['2026-11-12', '2027-05-30'],
+    homePlayed: 12,
+    awayPlayed: 12,
+    kickoffIso: '2026-11-22T15:00:00Z',
+    coachChanged: false,
+  });
+  check('les matchs à venir sont ignorés pour le repos',
+    !withFuture.some(trap => trap.id === 'rotation'),
+    JSON.stringify(withFuture.map(trap => trap.id)));
+
   const clean = detectMatchTraps({
     league: 'esp.1',
     homeName: 'Real Madrid',
