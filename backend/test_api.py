@@ -184,6 +184,58 @@ check(
     str(events[:1]),
 )
 
+print("7. Auto-contrôle de production (/api/smoke)")
+
+
+async def fake_fixtures(client, league, date_compact):
+    return [{"id": "401879234", "name": "Hull City - Brighton", "home": {"name": "Hull City"}, "away": {"name": "Brighton"}}]
+
+
+async def fake_base(league, date_compact, match_ids=None):
+    return [
+        {
+            "id": "401879234",
+            "league": league,
+            "factors": {
+                "forme": {"home": "1V-2N-2D", "away": "3V-0N-2D", "detailHome": [{"id": "1"}]},
+                "enjeu": {"classementHome": {"gd": 2, "name": "Hull City"}},
+                "style": {"home": {"possession": 33.8}},
+            },
+        }
+    ]
+
+
+api.fetch_day_fixtures = fake_fixtures
+api.build_base_matches = fake_base
+with TestClient(api.app) as client:
+    smoke = client.get("/api/smoke")
+smoke_body = smoke.json()
+check("auto-contrôle vert", smoke.status_code == 200, str(smoke_body)[:200])
+check("auto-contrôle complet", len(smoke_body.get("checks", [])) >= 8, str(len(smoke_body.get("checks", []))))
+
+
+async def broken_base(league, date_compact, match_ids=None):
+    return [
+        {
+            "id": "401879234",
+            "league": league,
+            "factors": {
+                "forme": {"home": "", "away": "", "detailHome": []},
+                "enjeu": {"classementHome": {"gd": 0, "name": "Hull City"}},
+                "style": {"home": None},
+            },
+        }
+    ]
+
+
+api.build_base_matches = broken_base
+with TestClient(api.app) as client:
+    smoke_broken = client.get("/api/smoke")
+check("auto-contrôle rouge sur régression", smoke_broken.status_code == 500, str(smoke_broken.status_code))
+check("régression nommée", "forme domicile non vide" in smoke_broken.json().get("failed", []), str(smoke_broken.json().get("failed")))
+api.fetch_day_fixtures = espn_module.fetch_day_fixtures
+api.build_base_matches = original_build
+
 print("")
 if failures:
     print(f"✗ {len(failures)} contrôle(s) en échec : {failures}")

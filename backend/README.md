@@ -101,23 +101,35 @@ Les contrôles sont hors réseau : ils valident la logique de collecte
 (fenêtre de forme, splits, libellés, repli en l'absence de source) et le
 contrat HTTP (analyse complète, repli moteur injoignable, journée vide).
 
-### Test de fumée de la production
+### Auto-contrôle de la production
 
-`scripts/smoke-production.mjs` (alias `npm run smoke`) appelle la
-production et vérifie les invariants : service vivant, moteur joignable,
-16 marchés, 10 000 simulations, catalogue des compétitions, journée de
-calendrier servie, **forme non vide**, **différence de buts réelle**,
-historique d'équipe alimenté, bloc analyst présent, diagnostic ESPN sans
-erreur, accueil rendu et fiche de match rendue (pas d'écran d'erreur
-Next.js).
+Deux niveaux complementaires de contrôle, tous deux sans coût de déploiement :
 
-Il est exécuté automatiquement par GitHub Actions
-(`.github/workflows/smoke.yml`) : à chaque push sur `main`, une fois par
-jour, et à la demande (« Run workflow »). Aucun déploiement Vercel n'est
-déclenché par ce contrôle — il consomme le quota GitHub Actions, pas
-celui de Vercel.
+**1. `/api/smoke` — auto-contrôle quotidien (cron Vercel)**
 
-Bases : `API_BASE` et `WEB_BASE` (par défaut les URL de production).
+`GET /api/smoke` rejoue une ingestion complète (calendrier, forme,
+classement, style) et vérifie les invariants : catalogue des
+compétitions, journée servie, forme non vide, historique alimenté,
+différence de buts réelle, classement renseigné, style disponible.
+
+- Réponse **200** si tout va bien, **500** avec la liste des
+  régressions (`failed`) sinon — un échec de cron se voit donc dans le
+  tableau de bord Vercel.
+- Programmé par `backend/vercel.json` (cron `37 5 * * *`, une exécution
+  par jour sur le plan Hobby) ; appelable à la main à tout moment.
+
+**2. `scripts/smoke-production.mjs` — test de fumée complet (local)**
+
+Alias `npm run smoke`. Appelle la production (API **et** site) et
+vérifie 33 invariants : service vivant, moteur joignable, 16 marchés,
+10 000 simulations, catalogue des compétitions, journée de calendrier
+servie, forme non vide, différence de buts réelle, historique
+d'équipe alimenté, bloc analyst présent, diagnostic ESPN sans erreur,
+accueil rendu et fiche de match rendue (pas d'écran d'erreur Next.js).
+
+À exécuter depuis une machine avec un accès réseau (le sandbox de
+développement n'atteint pas Vercel). Bases : `API_BASE` et `WEB_BASE`
+(par défaut les URL de production).
 
 ## Déploiement (Vercel)
 
