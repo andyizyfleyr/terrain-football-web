@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MatchAnalysisPanel } from './components/MatchAnalysisPanel';
 import { apiFetch, type ClientError } from './lib/clientApi';
 import { MatchCard } from './components/MatchCard';
+import { SiteFooter, SiteHeader } from './components/SiteHeader';
 import { MATCH_TAG_CONFIG, MATCH_TAG_LABELS, type MatchTag, type MatchTagId } from './lib/matchTags';
 import {
   buildMatchUrl,
@@ -347,21 +348,44 @@ export default function Home() {
     });
   }, []);
 
+  // 6 bis. Verrou de défilement de l'arrière-plan.
+  //
+  // Un SEUL propriétaire pour `body.style.overflow` : deux effets qui
+  // posent le verrou en lisant chacun la valeur courante se marchent
+  // dessus (le second lit « hidden » et le restaure ensuite). Résultat
+  // observé sur mobile : après « retour » depuis une fiche de rencontre,
+  // la page refusait de défiler.
+  //
+  // On mémorise donc la valeur d'origine UNE fois, quand le premier
+  // verrou apparaît, et on la restaure exactement quand le dernier
+  // disparaît.
+  const sheetOpen = Boolean(mobileSheet);
+  const lockPreviousOverflowRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!mobileSheet) return;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeMobileSheet();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.body.style.overflow = prevOverflow;
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, [mobileSheet, closeMobileSheet]);
+    const shouldLock = sheetOpen || mobileExpanded;
+    if (shouldLock && lockPreviousOverflowRef.current === null) {
+      lockPreviousOverflowRef.current = document.body.style.overflow;
+    }
+    if (shouldLock) {
+      document.body.style.overflow = 'hidden';
+    } else if (lockPreviousOverflowRef.current !== null) {
+      document.body.style.overflow = lockPreviousOverflowRef.current;
+      lockPreviousOverflowRef.current = null;
+    }
+  }, [sheetOpen, mobileExpanded]);
 
-  // 7. Suspend la restauration de scroll pendant une lecture sur mobile
+  // Filet de sécurité : un déverrouillage oublié (erreur, page quittée
+  // pendant une animation) ne doit jamais laisser la page figée.
+  useEffect(() => {
+    return () => {
+      if (lockPreviousOverflowRef.current !== null) {
+        document.body.style.overflow = lockPreviousOverflowRef.current;
+        lockPreviousOverflowRef.current = null;
+      }
+    };
+  }, []);
+
+  // 7. Échap ferme la feuille ouverte au-dessus du calendrier
   useEffect(() => {
     if (!mobileSheet && !mobileExpanded) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -370,13 +394,8 @@ export default function Home() {
         if (mobileSheet) closeMobileSheet();
       }
     };
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
     window.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.body.style.overflow = prevOverflow;
-      window.removeEventListener('keydown', onKeyDown);
-    };
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, [mobileSheet, mobileExpanded, closeMobileSheet]);
 
   // 8. Hauteur réelle du bloc collant mobile : les en-têtes de journée et les
@@ -504,20 +523,13 @@ export default function Home() {
       >
         Aller au calendrier
       </a>
-      <header className="appHeader">
-        <a className="brand" href="#top" aria-label="Terrain, accueil">
-          <span className="brandMark">T</span>
-          <span className="brandWords">
-            TERRAIN
-            <small>FOOTBALL INTELLIGENCE</small>
-          </span>
-        </a>
-        <nav className="mainNav" aria-label="Navigation principale">
-          <a className="navActive" href="#rencontres">
-            Rencontres
-          </a>
-        </nav>
-      </header>
+      <SiteHeader
+        items={[
+          { kind: 'anchor', href: '#rencontres', label: 'Rencontres', active: true },
+          { kind: 'link', href: '/matchs', label: 'Tous les matchs' },
+        ]}
+        quickAction={{ href: '/matchs', label: 'Tous les matchs →' }}
+      />
 
       <section className="appHero" id="top">
         <div className="heroCopy">
@@ -538,7 +550,7 @@ export default function Home() {
               <b>08</b> modules d’analyse
             </span>
             <span>
-              <b>{leagues.length || 18}</b> compétitions
+              <b>{leagues.length || 23}</b> compétitions
             </span>
             <span className="estimateNote">
               <i /> estimations, jamais garanties
@@ -1067,10 +1079,7 @@ export default function Home() {
         </div>
       )}
 
-      <footer className="appFooter">
-        <span>© TERRAIN · FOOTBALL INTELLIGENCE</span>
-        <span>DONNÉES STATISTIQUES PUBLIQUES · ESTIMATIONS, JAMAIS DES CERTITUDES</span>
-      </footer>
+      <SiteFooter />
     </main>
   );
 }

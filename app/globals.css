@@ -664,3 +664,73 @@
 .matchTagEmoji{flex:none;font-size:12px;line-height:1}
 .matchTagWarnings{margin:9px 0 0;padding-left:15px;color:#8b978f;font-size:8.5px;line-height:1.5}
 @media(max-width:760px){.matchTagList{grid-template-columns:1fr}.matchTagsPanel{margin:0 14px 10px}.tagFilterBar{padding:8px 0 2px}}
+
+/* ================================================================== */
+/* PAGE « TOUS LES MATCHS » — toutes compétitions, filtre par journée  */
+/* ================================================================== */
+.allMatchesIntro{padding:26px 0 16px}
+.allMatchesIntro .eyebrow{color:#4f8e64}
+.allMatchesIntro .eyebrow>span{background:#8ecaa0}
+.allMatchesIntro h1{margin:10px 0 6px;font-size:clamp(24px,3vw,31px);line-height:1.12;letter-spacing:-1.1px}
+.allMatchesIntro p{max-width:640px;margin:0;color:#7c8a81;font-size:12px;line-height:1.6}
+
+/* ---------- Sélecteur de journée ---------- */
+.dayPicker{display:flex;align-items:center;gap:12px;padding:11px;margin-bottom:16px;border:1px solid var(--line);border-radius:14px;background:#fff;box-shadow:var(--shadow)}
+.dayPickerScroll{display:flex;flex:1;min-width:0;gap:7px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+.dayPickerScroll::-webkit-scrollbar{display:none}
+.dayChip{flex:none;display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-width:96px;padding:7px 11px;border:1px solid #e6ece7;border-radius:10px;background:#fbfdfb;color:#69766d;font:600 10px 'DM Sans',sans-serif;cursor:pointer;transition:.15s;text-align:left}
+.dayChip small{color:#9aa59d;font:500 8px 'DM Mono',monospace;letter-spacing:.5px;text-transform:uppercase}
+.dayChip b{font-size:11px;font-weight:700;letter-spacing:-.2px;white-space:nowrap}
+.dayChip:hover{border-color:#bcd9c6;background:#f4faf5;color:var(--green)}
+.dayChipActive{border-color:var(--green);background:linear-gradient(150deg,#eef8f1,#fff);color:var(--green-dark);box-shadow:inset 0 -2px var(--green)}
+.dayChipActive small{color:#4f8e64}
+.dayPickerDate{flex:none;display:flex;align-items:center;gap:8px;padding-left:12px;border-left:1px solid #e9eeea}
+.dayPickerDate span{color:#96a199;font:500 8px 'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase}
+.dayPickerDate input{height:32px;padding:0 8px;border:1px solid #e5ebe6;border-radius:8px;background:#fff;color:var(--ink);font:600 11px 'DM Sans',sans-serif}
+
+/* ---------- Panneau principal ---------- */
+.allMatchesPanel{padding:18px 19px 4px;border:1px solid #e1e8e2;border-radius:15px;background:#fff;box-shadow:var(--shadow)}
+.allMatchesHeader{flex-wrap:wrap;gap:12px}
+.allMatchesHeader h2{margin:5px 0 4px;font-size:19px;line-height:1.2;letter-spacing:-.45px;text-transform:capitalize}
+.allMatchesHeader p{margin:0;color:#89958d;font-size:10px;line-height:1.5}
+.allMatchesPartial{color:#a5793a}
+.allMatchesActions{display:flex;align-items:center;gap:9px}
+.allMatchesSearch{width:290px;height:34px;margin:0;padding:0 10px}
+.allMatchesSearch input{font-size:10.5px}
+
+/* ---------- Filtres de compétitions ---------- */
+.leagueFilterBar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:12px 0 4px;border-top:1px solid #eef2ef;margin-top:12px}
+.leagueChip{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border:1px solid #e3ebe5;border-radius:999px;background:#fff;color:#5d6d63;font:600 9px 'DM Sans',sans-serif;cursor:pointer;transition:.15s}
+.leagueChip b{padding:1px 5px;border-radius:999px;background:#eef3ef;color:#6f7d73;font:700 8px 'DM Mono',monospace}
+.leagueChip:hover{border-color:#bcd9c6;color:var(--green)}
+.leagueChipOff{border-style:dashed;color:#a6b0a9;background:#f8faf8}
+.leagueChipOff b{background:#f1f4f1;color:#aeb7b1}
+.leagueChipOff:hover{color:#8a948d}
+.dayGroupHead a{color:inherit;text-decoration:none}
+.dayGroupHead a:hover{color:var(--green)}
+.dayGroupHead small{color:#96a199;font:600 9px 'DM Mono',monospace;letter-spacing:0;text-transform:none}
+
+@media(max-width:1050px){
+  .allMatchesSearch{width:230px}
+}
+@media(max-width:760px){
+  .allMatchesIntro{padding:18px 2px 12px}
+  .allMatchesIntro h1{font-size:24px}
+  .allMatchesIntro p{font-size:11px}
+  .dayPicker{flex-direction:column;align-items:stretch;gap:9px;padding:10px;margin-bottom:12px}
+  .dayPickerDate{padding:9px 0 0;border-left:0;border-top:1px solid #eef2ef;justify-content:space-between}
+  .dayPickerDate input{flex:1}
+  .dayChip{min-width:88px}
+  .allMatchesPanel{padding:14px 12px 4px;border-radius:13px}
+  .allMatchesHeader h1,.allMatchesHeader h2{font-size:17px}
+  .allMatchesActions{width:100%;flex-wrap:wrap;gap:8px}
+  .allMatchesSearch{width:100%;margin:0}
+  .leagueFilterBar{padding:10px 0 2px;margin-top:10px}
+}
+
+/* Accès rapide mobile : la navigation principale est masquée sous 760 px. */
+.headerQuick{display:none}
+@media(max-width:760px){
+  .headerQuick{margin-left:auto;display:inline-flex;align-items:center;padding:7px 11px;border:1px solid #d9e9dd;border-radius:9px;background:#f4faf5;color:#2f7049;font:600 10.5px 'DM Sans',sans-serif;text-decoration:none;white-space:nowrap}
+  .headerQuick:active{background:#e8f5eb}
+}

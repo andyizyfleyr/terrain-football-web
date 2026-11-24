@@ -297,6 +297,102 @@ check(
     str(calendar),
 )
 
+print("6 bis. Journee toutes compétitions (/api/fixtures/all)")
+
+
+async def fake_all_leagues(client, date_compact, leagues=None):
+    """Reproduit la reponse reelle : matchs etiquetes par competition."""
+    from espn import league_meta as _meta
+
+    slugs = leagues or [item["slug"] for item in espn_module.LEAGUE_CATALOG]
+    events = []
+    failed = []
+    per_league = {}
+    for slug in slugs:
+        if slug == "nor.1":
+            failed.append(slug)
+            continue
+        per_league[slug] = 1
+        meta = _meta(slug)
+        events.append(
+            {
+                "id": f"e-{slug}",
+                "date": f"{date_compact[:4]}-{date_compact[4:6]}-{date_compact[6:]}T18:00Z",
+                "name": "A - B",
+                "home": {"name": "A"},
+                "away": {"name": "B"},
+                "league": slug,
+                "leagueName": meta["name"],
+                "leagueCountry": meta["country"],
+                "leagueTier": meta["tier"],
+            }
+        )
+    events.sort(key=lambda item: item["date"])
+    return {
+        "date": date_compact,
+        "events": events,
+        "leagues": [_meta(slug) for slug in slugs],
+        "perLeague": per_league,
+        "failed": failed,
+        "total": len(events),
+    }
+
+
+original_all = espn_module.fetch_day_all_leagues
+espn_module.fetch_day_all_leagues = fake_all_leagues
+# La route importe la fonction dans main : on remplace la reference la-bas aussi.
+api_mod = sys.modules["main"]
+original_api_all = getattr(api_mod, "fetch_day_all_leagues", None)
+api_mod.fetch_day_all_leagues = fake_all_leagues
+with TestClient(api.app) as client:
+    all_payload = client.get("/api/fixtures/all?date=2026-11-24").json()
+    subset_payload = client.get("/api/fixtures/all?date=2026-11-24&leagues=den.1,gre.1").json()
+    bogus_payload = client.get("/api/fixtures/all?date=2026-11-24&leagues=xyz.9,den.1").json()
+espn_module.fetch_day_all_leagues = original_all
+if original_api_all is not None:
+    api_mod.fetch_day_all_leagues = original_api_all
+
+check(
+    "toutes ligues : une entree par competition du catalogue",
+    len(all_payload.get("leagues", [])) == len(espn_module.LEAGUE_CATALOG),
+    str(len(all_payload.get("leagues", []))),
+)
+check(
+    "toutes ligues : les matchs portent leur competition",
+    bool(all_payload.get("events"))
+    and all(
+        {"league", "leagueName", "leagueCountry"} <= set(e) for e in all_payload["events"]
+    ),
+    str(all_payload.get("events", [])[:1]),
+)
+check(
+    "toutes ligues : nom de competition resolvable cote front",
+    {e["league"]: e["leagueName"] for e in all_payload["events"]}.get("gre.1")
+    == "Super League grecque",
+    str({e["league"]: e["leagueName"] for e in all_payload["events"]}),
+)
+check(
+    "toutes ligues : une competition en panne est signalee sans casser la reponse",
+    all_payload.get("failed") == ["nor.1"] and len(all_payload.get("events", [])) == 22,
+    f"failed={all_payload.get('failed')} total={all_payload.get('total')}",
+)
+check(
+    "toutes ligues : filtre de competitions respecte",
+    [l["slug"] for l in subset_payload.get("leagues", [])] == ["den.1", "gre.1"],
+    str([l["slug"] for l in subset_payload.get("leagues", [])]),
+)
+check(
+    "toutes ligues : slug inconnu ignore (pas d'appel ESPN inutile)",
+    [l["slug"] for l in bogus_payload.get("leagues", [])] == ["den.1"],
+    str([l["slug"] for l in bogus_payload.get("leagues", [])]),
+)
+check(
+    "toutes ligues : matchs tries par heure",
+    [e["date"] for e in all_payload.get("events", [])]
+    == sorted(e["date"] for e in all_payload.get("events", [])),
+    str([e["date"] for e in all_payload.get("events", [])][:3]),
+)
+
 print("7. Auto-contrôle de production (/api/smoke)")
 
 
@@ -435,9 +531,32 @@ check(
     espn_module.resolve_league_slug("xyz.9"),
 )
 check(
-    "les 18 compétitions restent cataloguées",
-    len(catalog_slugs) == 18,
+    "les 23 compétitions restent cataloguées",
+    len(catalog_slugs) == 23,
     str(len(catalog_slugs)),
+)
+
+# Championnats peu couverts par les bookmakers : ajoutes pour que
+# l'utilisateur puisse les suivre (modele plutot que prix du marche).
+OBSCURE_SLUGS = ["den.1", "aut.1", "gre.1", "ned.2", "nor.1"]
+missing_obscure = [s for s in OBSCURE_SLUGS if s not in catalog_slugs]
+check(
+    "les 5 championnats peu couverts sont catalogués",
+    not missing_obscure,
+    ", ".join(missing_obscure) or str(OBSCURE_SLUGS),
+)
+check(
+    "les championnats peu couverts sont signalés comme tels",
+    all(
+        {l["slug"]: l for l in espn_module.LEAGUE_CATALOG}[s].get("obscure") is True
+        for s in OBSCURE_SLUGS
+    ),
+    str([l.get("obscure") for l in espn_module.LEAGUE_CATALOG if l["slug"] in OBSCURE_SLUGS]),
+)
+check(
+    "aucun doublon de slug au catalogue",
+    len(set(catalog_slugs)) == len(catalog_slugs),
+    str(sorted({s for s in catalog_slugs if catalog_slugs.count(s) > 1})),
 )
 
 # Régression : la Ligue des Champions (et la Ligue Europa) étaient

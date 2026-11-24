@@ -33,7 +33,7 @@ GET /api/analyze   -> analyse complète d'une journée ou d'un match
 
 Le front consomme deux routes pour le calendrier mensuel :
 
-- `GET /api/leagues` : les 18 compétitions (slug ESPN, nom, pays, niveau),
+- `GET /api/leagues` : les 23 compétitions (slug ESPN, nom, pays, niveau),
   championnats nationaux et coupes d'Europe (`uefa.champions`,
   `uefa.europa`) ;
 - `GET /api/fixtures?league=eng.1&date=20261122` : les matchs de la

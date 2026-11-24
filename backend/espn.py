@@ -124,6 +124,45 @@ LEAGUE_CATALOG: List[Dict[str, Any]] = [
         "country": "Europe",
         "tier": 2,
     },
+    # Championnats peu couverts par les bookmakers : ESPN les publie
+    # correctement (calendrier + feuilles de match completes), mais les
+    # files de cotes y sont rares ou absentes. Ils sont exposes pour que
+    # l'utilisateur puisse les suivre : l'analyse s'appuie alors sur le
+    # modele (xG, forme, effectif) et non sur le prix du marche.
+    #
+    # Verifies un par un sur `site.api.espn.com` le 2026-11-24 : saison
+    # 2026-27 vivante et calendrier non vide. Ecartes a ce titre :
+    # `sui.1` et `rou.1` (figes sur 2025-26, aucun evenement a venir),
+    # `cze.1`, `irl.1` et `den.2` (calendrier vide).
+    {"slug": "den.1", "name": "Superliga", "country": "Danemark", "tier": 1, "obscure": True},
+    {
+        "slug": "aut.1",
+        "name": "Bundesliga autrichienne",
+        "country": "Autriche",
+        "tier": 1,
+        "obscure": True,
+    },
+    {
+        "slug": "gre.1",
+        "name": "Super League grecque",
+        "country": "Grece",
+        "tier": 1,
+        "obscure": True,
+    },
+    {
+        "slug": "ned.2",
+        "name": "Eerste Divisie",
+        "country": "Pays-Bas",
+        "tier": 2,
+        "obscure": True,
+    },
+    {
+        "slug": "nor.1",
+        "name": "Eliteserien",
+        "country": "Norvege",
+        "tier": 1,
+        "obscure": True,
+    },
 ]
 
 # Slugs historiques acceptes en entree, reecrits vers le slug ESPN
@@ -567,6 +606,74 @@ async def fetch_day_fixtures(
     prune_cache(DAY_CACHE, DAY_CACHE_TTL)
     DAY_CACHE[key] = {"at": time.time(), "payload": result}
     return result
+
+
+def league_meta(league: str) -> Dict[str, Any]:
+    """Fiche de catalogue d'une competition (nom, pays, niveau)."""
+    for item in LEAGUE_CATALOG:
+        if item["slug"] == league:
+            return item
+    return {"slug": league, "name": league, "country": "", "tier": 0}
+
+
+async def fetch_day_all_leagues(
+    client: httpx.AsyncClient,
+    date_compact: str,
+    leagues: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Matchs d'une journee, toutes competitions du catalogue confondues.
+
+    Le calendrier « toutes ligues » change de nature par rapport au
+    calendrier d'une seule competition : l'utilisateur veut voir ce qui
+    se joue AUJOURD'HUI, pas ce qui se joue dans un mois. La fenetre est
+    donc le jour demande, et chaque competition est interrogee en
+    parallele (le semaphore borne l'appel ESPN a `MAX_CONCURRENT`).
+
+    Une competition dont le scoreboard echoue n'annule pas la reponse :
+    elle est listee dans `failed` pour que le front puisse le dire
+    honnetement (« 21 competitions sur 23 ») au lieu d'afficher une liste
+    silencieusement incomplete.
+    """
+    slugs = leagues or [item["slug"] for item in LEAGUE_CATALOG]
+
+    async def one(slug: str) -> Tuple[str, List[Dict[str, Any]], bool]:
+        try:
+            result = await fetch_day_fixtures(client, slug, date_compact)
+            return slug, list(result.get("events") or []), True
+        except Exception:
+            return slug, [], False
+
+    results = await asyncio.gather(*(one(slug) for slug in slugs))
+
+    events: List[Dict[str, Any]] = []
+    failed: List[str] = []
+    per_league: Dict[str, int] = {}
+    for slug, league_events, ok in results:
+        if not ok:
+            failed.append(slug)
+            continue
+        per_league[slug] = len(league_events)
+        meta = league_meta(slug)
+        for event in league_events:
+            events.append(
+                {
+                    **event,
+                    "league": slug,
+                    "leagueName": meta.get("name", slug),
+                    "leagueCountry": meta.get("country", ""),
+                    "leagueTier": meta.get("tier", 0),
+                }
+            )
+
+    events.sort(key=lambda item: (item.get("date") or "", item.get("id") or ""))
+    return {
+        "date": date_compact,
+        "events": events,
+        "leagues": [league_meta(slug) for slug in slugs],
+        "perLeague": per_league,
+        "failed": failed,
+        "total": len(events),
+    }
 
 
 # Forme récente (schedule d'équipe)
