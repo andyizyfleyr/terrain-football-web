@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -115,6 +115,73 @@ async def fixtures(
     async with _client() as client:
         events = await fetch_day_fixtures(client, league, date_compact)
     return JSONResponse({"league": league, "date": date_compact, "events": events})
+
+
+@app.get("/api/smoke")
+async def smoke() -> JSONResponse:
+    """Auto-controle de la production : la chaine de donnees tient-elle ?
+
+    Les regressions les plus couteuses de ce projet ne sont pas des
+    erreurs de compilation mais des ruptures SILENCIEUSES : ESPN qui
+    change de format, une limitation de debit qui vide la forme, une
+    route du front en 404. Ce controle rejoue une ingestion complete
+    (calendrier, forme, classement, style) et verifie les invariants.
+
+    Programme par une cron Vercel (quotas Vercel, pas GitHub) et
+    appelable a la main : `/api/smoke`.
+    """
+    checks: List[Dict[str, Any]] = []
+
+    def note(label: str, ok: bool, detail: str = "") -> None:
+        checks.append({"label": label, "ok": bool(ok), "detail": detail})
+
+    note("catalogue des compétitions", len(LEAGUE_CATALOG) >= 10, f"{len(LEAGUE_CATALOG)} compétitions")
+
+    # Une journée recente avec des matchs (on remonte le temps).
+    reference: Optional[Dict[str, Any]] = None
+    reference_date = ""
+    today = datetime.utcnow()
+    for back in range(1, 11):
+        day = today - timedelta(days=back)
+        date_compact = day.strftime("%Y%m%d")
+        async with _client() as client:
+            events = await fetch_day_fixtures(client, "eng.1", date_compact)
+        if events:
+            reference = events[0]
+            reference_date = date_compact
+            break
+    note("journée de calendrier servie", bool(reference), reference_date or "aucun match sur 10 jours")
+
+    if reference:
+        async with _client() as client:
+            base = await build_base_matches("eng.1", reference_date, [reference["id"]])
+        match = base[0] if base else {}
+        factors = match.get("factors") or {}
+        forme = factors.get("forme") or {}
+        enjeu = factors.get("enjeu") or {}
+        classement = enjeu.get("classementHome") or {}
+        gd = classement.get("gd")
+        note("match analysé", bool(match), str(reference.get("name") or ""))
+        note("forme domicile non vide", bool(str(forme.get("home") or "").strip()), str(forme.get("home")))
+        note("forme extérieure non vide", bool(str(forme.get("away") or "").strip()), str(forme.get("away")))
+        note(
+            "historique de forme alimenté",
+            isinstance(forme.get("detailHome"), list) and len(forme["detailHome"]) > 0,
+            f"{len(forme.get('detailHome') or [])} matchs",
+        )
+        note("différence de buts réelle", isinstance(gd, (int, float)) and gd != 0, str(gd))
+        note("classement renseigné", bool(classement.get("name")), str(classement.get("name")))
+        note("style de jeu disponible", bool((factors.get("style") or {}).get("home")), "")
+        note("saison cohérente", match.get("league") == "eng.1", str(match.get("league")))
+
+    failed = [c for c in checks if not c["ok"]]
+    payload = {
+        "ok": not failed,
+        "checks": checks,
+        "failed": [c["label"] for c in failed],
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+    }
+    return JSONResponse(payload, status_code=200 if not failed else 500)
 
 
 @app.get("/api/health")
