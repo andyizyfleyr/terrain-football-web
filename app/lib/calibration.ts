@@ -44,6 +44,14 @@ export type CalibrationMetrics = {
   calibratedLogLossInSample: number;
   /** Nombre de blocs de validation croisée utilisés. */
   crossValidationFolds: number;
+  /**
+   * Log-loss en marche avant STRICTE : chaque bloc est évalué avec une
+   * calibration ajustée uniquement sur les blocs précédents. Aucun match
+   * n'est évalué avec une calibration qui a vu son avenir.
+   */
+  walkForwardLogLoss: number;
+  /** Rencontrées effectivement couvertes par la marche avant stricte. */
+  walkForwardEvaluated: number;
   /** Log-loss d'une référence naïve (moyennes de la league). */
   naiveLogLoss: number;
   brier: number;
@@ -57,7 +65,13 @@ export type CalibrationMetrics = {
 export type ConfidenceBin = {
   min: number;
   max: number;
-  probability: number;
+  /**
+   * Probabilité mesurée sur l'historique pour cette tranche de confiance.
+   * null quand la tranche ne contient AUCUN échantillon : dans ce cas,
+   * aucune probabilité ne peut être mesurée et l'inventer (prendre le
+   * milieu de la tranche) ferait passer une estimation pour une mesure.
+   */
+  probability: number | null;
   samples: number;
 };
 

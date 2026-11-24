@@ -17,7 +17,13 @@
  *     collectés après coup ;
  *   - absences et CONFIRMATION des compositions conservées (information
  *     disponible avant le coup d'envoi) ;
- *   - cotes relevées avant le coup d'envoi, fournisseur unique (Bet365).
+ *   - cotes relevées avant le coup d'envoi, fournisseur unique (Bet365) ;
+ *   - ARBITRE et MÉTÉO collectés mais NON UTILISÉS par le rejeu : le
+ *     profil d'arbitre est un cumul de carrière lu à la date de collecte
+ *     (il inclut les matchs postérieurs à la rencontre), et la météo
+ *     collectée est la météo RÉELLE du match, pas la prévision
+ *     d'avant-match. Impact mesuré de leur retrait : log-loss modèle
+ *     1,0576 → 1,0573, soit négligeable.
  *
  * COMPOSITIONS ET JOUEURS — ce qui est stocké, et pourquoi c'est peu :
  *   - le drapeau « compositions confirmées » est stocké pour les 127

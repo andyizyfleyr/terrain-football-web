@@ -74,6 +74,21 @@ export const ESPN_TO_FOTMOB_LEAGUE: Record<string, number[]> = {
 // Cache mémoire court côté serveur (évite de marteler FotMob lors d'un scan de journée)
 type CacheEntry<T> = { expiresAt: number; value: T };
 const memoryCache = new Map<string, CacheEntry<any>>();
+// Le cache est borné en DUREE (ttl) ET en NOMBRE d'entrées : sans purge,
+// il grossirait indéfiniment sur une instance qui vit longtemps, chaque
+// URL de match ou de journée étant une clé.
+const MEMORY_CACHE_MAX_ENTRIES = 500;
+
+function pruneMemoryCache(now: number): void {
+  memoryCache.forEach((entry, key) => {
+    if (entry.expiresAt <= now) memoryCache.delete(key);
+  });
+  while (memoryCache.size > MEMORY_CACHE_MAX_ENTRIES) {
+    const oldest = memoryCache.keys().next();
+    if (oldest.done) break;
+    memoryCache.delete(oldest.value);
+  }
+}
 
 async function fetchFotmobJson<T = any>(pathWithQuery: string, ttlSeconds = 300, timeoutMs = 4500): Promise<T | null> {
   const now = Date.now();
@@ -94,6 +109,7 @@ async function fetchFotmobJson<T = any>(pathWithQuery: string, ttlSeconds = 300,
     const contentType = res.headers.get('content-type') || '';
     if (!contentType.includes('json')) return null;
     const data = (await res.json()) as T;
+    pruneMemoryCache(now);
     memoryCache.set(pathWithQuery, { expiresAt: now + ttlSeconds * 1000, value: data });
     return data;
   } catch {

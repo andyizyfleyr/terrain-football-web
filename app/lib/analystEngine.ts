@@ -50,6 +50,7 @@ import {
   valueAssessment,
   type CalibrationParams,
 } from './calibration';
+import { normaliseOutcomeSet, safeProbability, safeProbabilityOr } from './probabilities';
 import { DEFAULT_CALIBRATION } from './calibrationParams';
 
 export { devigPower, devigShin, devigThreeWayDecimal, devigTwoWayDecimal, normaliseProbs } from './devig';
@@ -2077,12 +2078,20 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   if (market) {
     method = market.method;
     overround = market.overround;
+    // Contrôle de sortie : les probabilités dé-vigguées doivent être
+    // valides avant d'être comparées au modèle (sinon les écarts, et
+    // donc la détection de valeur, seraient calculés sur du bruit).
     devigged = {
-      home: market.probs.home,
-      draw: market.probs.draw,
-      away: market.probs.away,
-      over25: market.over25,
-      btts: market.btts,
+      ...normaliseOutcomeSet(
+        {
+          home: market.probs.home,
+          draw: market.probs.draw,
+          away: market.probs.away,
+        },
+        { home: 1 / 3, draw: 1 / 3, away: 1 / 3 }
+      ),
+      over25: safeProbability(market.over25),
+      btts: safeProbability(market.btts),
     };
     // Température puis mélange : la température corrige le biais global du
     // modèle (trop prudent ou trop affirmatif), le mélange arbitre avec le
@@ -2093,17 +2102,26 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
       calibration
     ).probs;
     calibrated = {
-      home: modelWeight * tempered.home + (1 - modelWeight) * market.probs.home,
-      draw: modelWeight * tempered.draw + (1 - modelWeight) * market.probs.draw,
-      away: modelWeight * tempered.away + (1 - modelWeight) * market.probs.away,
-      over25:
+      ...normaliseOutcomeSet(
+        {
+          home: modelWeight * tempered.home + (1 - modelWeight) * market.probs.home,
+          draw: modelWeight * tempered.draw + (1 - modelWeight) * market.probs.draw,
+          away: modelWeight * tempered.away + (1 - modelWeight) * market.probs.away,
+        },
+        { home: 1 / 3, draw: 1 / 3, away: 1 / 3 }
+      ),
+      over25: safeProbabilityOr(
         market.over25 !== null
           ? modelWeight * pureModel.over25 + (1 - modelWeight) * market.over25
           : pureModel.over25,
-      btts:
+        pureModel.over25
+      ),
+      btts: safeProbabilityOr(
         market.btts !== null
           ? modelWeight * pureModel.btts + (1 - modelWeight) * market.btts
           : pureModel.btts,
+        pureModel.btts
+      ),
     };
     edges = {
       home: calibrated.home - market.probs.home,
@@ -2148,13 +2166,18 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   const sim = {
     runs: mc.runs,
     seed: mc.seed,
-    home: mc.home,
-    draw: mc.draw,
-    away: mc.away,
-    over15: mc.over15,
-    over25: mc.over25,
-    over35: mc.over35,
-    btts: mc.btts,
+    // Contrôle de sortie : la simulation doit produire un ensemble
+    // exhaustif valide (valeurs finies, dans [0,1], sommant à 1). Sinon
+    // on affiche une répartition uniforme explicite plutôt que des
+    // nombres faux.
+    ...normaliseOutcomeSet(
+      { home: mc.home, draw: mc.draw, away: mc.away },
+      { home: 1 / 3, draw: 1 / 3, away: 1 / 3 }
+    ),
+    over15: safeProbability(mc.over15) ?? 0,
+    over25: safeProbability(mc.over25) ?? 0,
+    over35: safeProbability(mc.over35) ?? 0,
+    btts: safeProbability(mc.btts) ?? 0,
     expectedGoals: {
       home: round(mc.expectedGoals.home, 2),
       away: round(mc.expectedGoals.away, 2),

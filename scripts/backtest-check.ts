@@ -18,7 +18,7 @@
  */
 import { writeFileSync } from 'node:fs';
 import { COMBINED_BACKTEST_DATASET } from '../app/lib/backtestDatasetCombined.ts';
-import { buildWalkForwardInputs, runBacktest, type BacktestDataset } from '../app/lib/backtest.ts';
+import { buildWalkForwardInputs, runBacktest, temporalFoldIndex, type BacktestDataset } from '../app/lib/backtest.ts';
 import { DEFAULT_CALIBRATION } from '../app/lib/calibrationParams.ts';
 
 const WRITE = process.argv.includes('--write');
@@ -218,7 +218,10 @@ check(
 console.log('4. Métriques');
 const m = result.metrics;
 console.log(
-  `     log-loss : modèle ${m.modelLogLoss} · calibré hors échantillon ${m.calibratedLogLoss} (in-sample ${m.calibratedLogLossInSample}, ${m.crossValidationFolds} blocs) · marché ${m.marketLogLoss ?? '—'} · naïf ${m.naiveLogLoss}`
+  `     log-loss : modèle ${m.modelLogLoss} · calibré hors échantillon ${m.calibratedLogLoss} (in-sample ${m.calibratedLogLossInSample}, ${m.crossValidationFolds} blocs temporels) · marché ${m.marketLogLoss ?? '—'} · naïf ${m.naiveLogLoss}`
+);
+console.log(
+  `     marche avant stricte : ${m.walkForwardLogLoss} sur ${m.walkForwardEvaluated}/${m.sampleSize} rencontres évaluées sans jamais voir l’avenir`
 );
 console.log(`     Brier ${m.brier} · accuracy ${(m.accuracy * 100).toFixed(1)} % · ROI valeur ${m.valueRoi ?? '—'}`);
 console.log(
@@ -236,6 +239,28 @@ check(
   'validation croisée effective (≥ 3 blocs)',
   m.crossValidationFolds >= 3,
   `${m.crossValidationFolds} blocs`
+);
+// Non-régression : les blocs de validation croisée doivent être
+// CONTIGUS dans le temps. L'ancien découpage entrelacé
+// (`index % folds`) evalait un match avec des matchs postérieurs.
+const foldIndex = temporalFoldIndex(result.samples, m.crossValidationFolds);
+const byDate = result.samples
+  .map((sample, index) => ({ date: sample.date, fold: foldIndex[index] }))
+  .sort((a, b) => a.date.localeCompare(b.date));
+check(
+  'blocs de validation croisée contigus dans le temps',
+  byDate.every((row, index) => index === 0 || row.fold >= byDate[index - 1].fold),
+  `blocs : ${Array.from(new Set(byDate.map(r => r.fold))).join(', ')}`
+);
+check(
+  'marche avant stricte : log-loss calculée',
+  Number.isFinite(m.walkForwardLogLoss) && m.walkForwardLogLoss > 0,
+  `${m.walkForwardLogLoss}`
+);
+check(
+  'marche avant stricte : le premier bloc reste non évalué',
+  m.walkForwardEvaluated > 0 && m.walkForwardEvaluated < m.sampleSize,
+  `${m.walkForwardEvaluated}/${m.sampleSize}`
 );
 check(
   'log-loss in-sample ≤ log-loss hors échantillon',
@@ -350,7 +375,10 @@ if (WRITE && (!failures || FORCE)) {
   // Réécriture des paramètres versionnés à partir de l'ajustement.
   const p = result.params;
   const bins = p.confidenceBins
-    .map(b => `    { min: ${b.min}, max: ${b.max}, probability: ${b.probability}, samples: ${b.samples} },`)
+    .map(
+      b =>
+        `    { min: ${b.min}, max: ${b.max}, probability: ${b.probability === null ? 'null' : b.probability}, samples: ${b.samples} },`
+    )
     .join('\n');
   // Le ROI est rendu hors du gabarit : un guillemet simple dans le
   // texte généré casserait la chaîne de la limitation.
@@ -418,6 +446,8 @@ ${bins}
     calibratedLogLoss: ${p.metrics.calibratedLogLoss},
     calibratedLogLossInSample: ${p.metrics.calibratedLogLossInSample},
     crossValidationFolds: ${p.metrics.crossValidationFolds},
+    walkForwardLogLoss: ${p.metrics.walkForwardLogLoss},
+    walkForwardEvaluated: ${p.metrics.walkForwardEvaluated},
     naiveLogLoss: ${p.metrics.naiveLogLoss},
     brier: ${p.metrics.brier},
     accuracy: ${p.metrics.accuracy},

@@ -617,13 +617,18 @@ function buildLeagueWalkForward(
       market: match.odds
         ? { ...match.odds, format: 'decimal', source: 'Backtest', providerLabel: match.provider }
         : null,
-      referee: match.referee
-        ? {
-            name: 'Arbitre backtest',
-            ...match.referee,
-          }
-        : null,
-      weather: match.weather ?? null,
+      // ANTI-FUITE : ni l'arbitre ni la météo ne sont utilisés dans le
+      // rejeu. Le profil d'arbitre collecté est un cumul de carrière lu
+      // à la date de collecte : il inclut les matchs POSTÉRIEURS à la
+      // rencontre prédite. La météo collectée est la météo RÉELLE du
+      // match, qui n'est pas une information d'avant-match (seule la
+      // prévision l'est, et elle n'est pas conservée).
+      // Impact mesuré sur le jeu de référence : log-loss 1,0576 → 1,0573
+      // (sans arbitre ni météo) : négligeable, la correction est donc
+      // sans risque. En production, l'analyse d'un match à venir utilise
+      // bien l'arbitre désigné et la prévision météo.
+      referee: null,
+      weather: null,
       h2h: null,
       league: { rowsAll, rowsHome, rowsAway, xgRows: rowsAll, legend: [], name: league },
       home: {
@@ -829,6 +834,28 @@ export function fitBlendParams(
  * Log-loss calibrée hors échantillon : pour chaque bloc, les paramètres
  * sont ajustés sur les autres blocs puis évalués sur le bloc écarté.
  */
+/**
+ * Répartit les échantillons en blocs TEMPORELS contigus.
+ *
+ * L'ancien découpage (`index % folds`) entrelaçait les blocs : un match
+ * était évalué avec des matchs du même échantillon situés APRÈS lui,
+ * donc la validation croisée laissait passer de l'information future.
+ * Ici, une fois les échantillons triés par date, l'indice de bloc est
+ * croissant : chaque bloc couvre une période continue.
+ */
+export function temporalFoldIndex(samples: BacktestSample[], folds: number): number[] {
+  const result = new Array(samples.length).fill(0);
+  if (samples.length === 0 || folds < 2) return result;
+  const order = samples
+    .map((_, index) => index)
+    .sort((a, b) => samples[a].date.localeCompare(samples[b].date));
+  const size = Math.max(1, Math.floor(order.length / folds));
+  order.forEach((sampleIndex, position) => {
+    result[sampleIndex] = Math.min(folds - 1, Math.floor(position / size));
+  });
+  return result;
+}
+
 export function crossValidatedLogLoss(samples: BacktestSample[], folds: number): number {
   if (samples.length < 20 || folds < 2) {
     let loss = 0;
@@ -841,11 +868,12 @@ export function crossValidatedLogLoss(samples: BacktestSample[], folds: number):
     return samples.length ? loss / samples.length : 0;
   }
 
+  const foldIndex = temporalFoldIndex(samples, folds);
   let total = 0;
   let count = 0;
   for (let fold = 0; fold < folds; fold++) {
-    const train = samples.filter((_, index) => index % folds !== fold);
-    const test = samples.filter((_, index) => index % folds === fold);
+    const train = samples.filter((_, index) => foldIndex[index] !== fold);
+    const test = samples.filter((_, index) => foldIndex[index] === fold);
     if (!train.length || !test.length) continue;
     const best = fitBlendParams(train);
     if (!best) continue;
@@ -860,6 +888,49 @@ export function crossValidatedLogLoss(samples: BacktestSample[], folds: number):
     }
   }
   return count ? total / count : 0;
+}
+
+/**
+ * Log-loss en marche avant STRICTE : chaque bloc est évalué avec une
+ * calibration ajustée uniquement sur les blocs qui le PRÉCÈDENT dans le
+ * temps. Aucun match n'est donc jamais évalué avec une calibration
+ * qui a vu son avenir.
+ *
+ * Le premier bloc n'a pas d'historique d'ajustement : il n'est pas
+ * évalué. Le résultat indique donc combien de rencontres ont été
+ * effectivement couvertes.
+ */
+export function walkForwardLogLoss(
+  samples: BacktestSample[],
+  folds: number
+): { loss: number; evaluated: number; covered: number } {
+  if (samples.length < 20 || folds < 2) {
+    return { loss: crossValidatedLogLoss(samples, folds), evaluated: samples.length, covered: samples.length };
+  }
+  const foldIndex = temporalFoldIndex(samples, folds);
+  let total = 0;
+  let evaluated = 0;
+  for (let fold = 1; fold < folds; fold++) {
+    const train = samples.filter((_, index) => foldIndex[index] < fold);
+    const test = samples.filter((_, index) => foldIndex[index] === fold);
+    if (!train.length || !test.length) continue;
+    const best = fitBlendParams(train);
+    if (!best) continue;
+    for (const sample of test) {
+      const probs = applyCalibration(
+        sample.model,
+        sample.market,
+        { sharpness: best.sharpness, modelWeight: best.weight } as CalibrationParams
+      ).probs;
+      total += logLoss(probs, sample.outcome);
+      evaluated += 1;
+    }
+  }
+  return {
+    loss: evaluated ? total / evaluated : 0,
+    evaluated,
+    covered: samples.length,
+  };
 }
 
 export function evaluateSamples(
@@ -932,6 +1003,7 @@ export function evaluateSamples(
   // capacité à se généraliser.
   const folds = samples.length >= 100 ? 5 : samples.length >= 40 ? 4 : 3;
   const crossValidated = crossValidatedLogLoss(samples, folds);
+  const walkForward = walkForwardLogLoss(samples, folds);
   const metrics: CalibrationMetrics = {
     sampleSize: samples.length,
     league: dataset.league,
@@ -941,6 +1013,8 @@ export function evaluateSamples(
     calibratedLogLoss: Number(crossValidated.toFixed(4)),
     calibratedLogLossInSample: Number((calibratedLoss / n).toFixed(4)),
     crossValidationFolds: folds,
+    walkForwardLogLoss: Number(walkForward.loss.toFixed(4)),
+    walkForwardEvaluated: walkForward.evaluated,
     naiveLogLoss: Number((naiveLoss / n).toFixed(4)),
     brier: Number((brier / n).toFixed(4)),
     accuracy: Number((correct / n).toFixed(4)),
@@ -961,7 +1035,10 @@ export function evaluateSamples(
     );
   }
   notes.push(
-    `Log-loss : modèle pur ${metrics.modelLogLoss} · calibré hors échantillon ${metrics.calibratedLogLoss} (in-sample ${metrics.calibratedLogLossInSample}, ${metrics.crossValidationFolds} blocs) · marché ${metrics.marketLogLoss ?? '—'} · naïf ${metrics.naiveLogLoss}.`
+    `Log-loss : modèle pur ${metrics.modelLogLoss} · calibré hors échantillon ${metrics.calibratedLogLoss} (in-sample ${metrics.calibratedLogLossInSample}, ${metrics.crossValidationFolds} blocs temporels) · marché ${metrics.marketLogLoss ?? '—'} · naïf ${metrics.naiveLogLoss}.`
+  );
+  notes.push(
+    `Marche avant stricte : ${metrics.walkForwardLogLoss} sur ${metrics.walkForwardEvaluated} rencontre(s) évaluées avec une calibration ajustée uniquement sur les blocs PRÉCÉDENTS (aucun match n’est évalué avec une calibration qui a vu son avenir).`
   );
   notes.push(
     'Ajustement sans fuite temporelle : seuls les cumuls antérieurs, les absences et les compositions confirmées sont utilisés ; les totaux de saison collectés après coup sont exclus.'
@@ -1214,11 +1291,16 @@ function buildConfidenceBins(
 ): ConfidenceBin[] {
   const edges = [0, 0.15, 0.3, 0.45, 0.6, 1.01];
   const bins: ConfidenceBin[] = [];
+  // La tranche doit décrire la MÊME chose que la confiance affichée : on
+  // utilise donc exactement la formule de `calibratedConfidence`, terme
+  // `marketPick` compris. Sans lui, les tranches mesuraient une autre
+  // grandeur que celle affichée à l'utilisateur.
   const scored = samples.map(sample => {
     const z =
       logistic.intercept +
       logistic.separation * sample.separation +
-      logistic.agreement * sample.agreement;
+      logistic.agreement * sample.agreement +
+      (logistic.marketPick ?? 0) * (sample.marketPick ?? 0);
     const p = 1 / (1 + Math.exp(-z));
     return { p, hit: topPick(sample.model) === sample.outcome };
   });
@@ -1226,13 +1308,15 @@ function buildConfidenceBins(
   for (let i = 0; i < edges.length - 1; i++) {
     const slice = scored.filter(row => row.p >= edges[i] && row.p < edges[i + 1]);
     const hits = slice.filter(row => row.hit).length;
+    // Une tranche sans échantillon n'a AUCUNE probabilité mesurée :
+    // on la laisse vide plutôt que d'y mettre une valeur inventée.
     const probability = slice.length
       ? Math.max(0.05, Math.min(0.95, (hits + 1) / (slice.length + 4)))
-      : (edges[i] + edges[i + 1]) / 2;
+      : null;
     bins.push({
       min: Number(edges[i].toFixed(3)),
       max: Number(edges[i + 1].toFixed(3)),
-      probability: Number(probability.toFixed(4)),
+      probability: probability === null ? null : Number(probability.toFixed(4)),
       samples: slice.length,
     });
   }

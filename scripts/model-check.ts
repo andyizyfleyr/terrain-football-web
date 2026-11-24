@@ -53,6 +53,13 @@ import {
   type CalibrationParams,
 } from '../app/lib/calibration.ts';
 import { DEFAULT_CALIBRATION } from '../app/lib/calibrationParams.ts';
+import {
+  isValidOutcomeSet,
+  isValidProbability,
+  normaliseOutcomeSet,
+  safeProbability,
+  safeProbabilityOr,
+} from '../app/lib/probabilities.ts';
 import { runQuantitativeAnalyst, shrunkMean, shrunkRatio } from '../app/lib/analystEngine.ts';
 import { longDate, parseDayKey } from '../app/lib/terrain.ts';
 
@@ -447,6 +454,35 @@ console.log('7. Calibration');
   );
 }
 
+console.log('7bis. Validation des probabilités');
+{
+  check('probabilité valide acceptée', isValidProbability(0.42));
+  check('probabilité nulle acceptée', isValidProbability(0));
+  check('probabilité à 1 acceptée', isValidProbability(1));
+  check('NaN refusé', !isValidProbability(Number.NaN));
+  check('infini refusé', !isValidProbability(Number.POSITIVE_INFINITY));
+  check('probabilité négative refusée', !isValidProbability(-0.01));
+  check('probabilité > 1 refusée', !isValidProbability(1.01));
+
+  const valid = { home: 0.5, draw: 0.3, away: 0.2 };
+  check('ensemble exhaustif valide accepté', isValidOutcomeSet(valid));
+  check('ensemble dont la somme ≠ 1 refusé', !isValidOutcomeSet({ home: 0.5, draw: 0.3, away: 0.1 }));
+  check('ensemble avec NaN refusé', !isValidOutcomeSet({ home: Number.NaN, draw: 0.5, away: 0.5 }));
+
+  const renormalised = normaliseOutcomeSet({ home: 0.45, draw: 0.27, away: 0.18 }, valid);
+  check(
+    'ensemble renormalisé',
+    close(renormalised.home + renormalised.draw + renormalised.away, 1, 1e-12)
+  );
+  const untouched = normaliseOutcomeSet(valid, { home: 0, draw: 0, away: 0 });
+  check('ensemble valide inchangé', untouched.home === 0.5 && untouched.draw === 0.3 && untouched.away === 0.2);
+  const fallback = normaliseOutcomeSet({ home: Number.NaN, draw: 0.5, away: 0.5 }, valid);
+  check('ensemble inexploitable remplacé par le repli', fallback.home === 0.5 && fallback.draw === 0.3);
+  check('probabilité simple : nulle si inexploitable', safeProbability(Number.NaN) === null);
+  check('probabilité simple : conservée si valide', safeProbability(0.3) === 0.3);
+  check('probabilité simple avec repli', safeProbabilityOr(Number.NaN, 0.25) === 0.25);
+}
+
 console.log('8. Garde-fous du moteur');
 {
   const emptyTable = {
@@ -489,6 +525,131 @@ console.log('8. Garde-fous du moteur');
   check('moteur : intervalle de crédibilité fourni', report.uncertainty.home.low < report.uncertainty.home.high);
   check('moteur : confiance mesurée fournie', report.confidence.probability > 0 && report.confidence.probability < 1);
   check('moteur : bloc calibration présent', report.calibration.modelWeight >= 0 && report.calibration.modelWeight <= 1);
+
+  // Robustesse aux données manquantes (ESPN / FotMob indisponibles) :
+  // aucune donnée externe, aucun tableau de classement, aucun joueur,
+  // aucun marché. Le rapport doit rester complet et ne contenir ni NaN
+  // ni probabilité hors bornes.
+  const bare = runQuantitativeAnalyst({
+    matchId: 'vide',
+    kickoffIso: '2026-11-23T15:00:00.000Z',
+    baseLambdas: { home: 1.4, away: 1.1 },
+    covarianceSamples: [],
+    halfTimeSamples: [],
+    market: null,
+    referee: null,
+    weather: null,
+    h2h: null,
+    league: { rowsAll: [], rowsHome: [], rowsAway: [], xgRows: [], legend: [] },
+    home: {
+      teamId: 1,
+      name: 'Équipe A',
+      tableAll: null,
+      tableHome: null,
+      tableAway: null,
+      xgRow: null,
+      recentMatches: [],
+      stats: {},
+      squad: [],
+      absences: [],
+      lineup: null,
+      formation: null,
+      playerStats: {},
+    },
+    away: {
+      teamId: 2,
+      name: 'Équipe B',
+      tableAll: null,
+      tableHome: null,
+      tableAway: null,
+      xgRow: null,
+      recentMatches: [],
+      stats: {},
+      squad: [],
+      absences: [],
+      lineup: null,
+      formation: null,
+      playerStats: {},
+    },
+  } as any);
+
+  const collectNumbers = (node: unknown, path: string, out: string[]): void => {
+    if (typeof node === 'number') {
+      if (!Number.isFinite(node)) out.push(`${path} = ${node}`);
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.forEach((item, index) => collectNumbers(item, `${path}[${index}]`, out));
+      return;
+    }
+    if (node && typeof node === 'object') {
+      for (const [key, value] of Object.entries(node)) collectNumbers(value, `${path}.${key}`, out);
+    }
+  };
+  const invalidNumbers: string[] = [];
+  collectNumbers(bare, 'rapport', invalidNumbers);
+  check(
+    'moteur sans donnée externe : aucun nombre non fini',
+    invalidNumbers.length === 0,
+    invalidNumbers.slice(0, 5).join(' · ')
+  );
+
+  const probabilities: string[] = [];
+  const addIfProbability = (label: string, value: unknown): void => {
+    if (typeof value !== 'number') return;
+    if (!Number.isFinite(value) || value < 0 || value > 1) probabilities.push(`${label}=${value}`);
+  };
+  const addValues = (label: string, values: Record<string, number | null | undefined>): void => {
+    for (const [key, value] of Object.entries(values)) {
+      addIfProbability(`${label}.${key}`, value);
+    }
+  };
+  addValues('market.pureModel', bare.market.pureModel);
+  addValues('market.calibrated', bare.market.calibrated);
+  addValues('market.devigged', bare.market.devigged);
+  addIfProbability('market.over25', bare.market.pureModel.over25);
+  addIfProbability('market.btts', bare.market.pureModel.btts);
+  const p = bare.pronostics;
+  addIfProbability('pronostics.totalOdd', p.totalOdd);
+  addIfProbability('pronostics.totalEven', p.totalEven);
+  addValues('pronostics.halves.first', p.halves.first);
+  addValues('pronostics.halves.second', p.halves.second);
+  addValues('pronostics.atLeastOneHalf', p.atLeastOneHalf);
+  addValues('pronostics.firstTo.one', p.firstTo.one);
+  addValues('pronostics.firstTo.two', p.firstTo.two);
+  addValues('pronostics.firstTo.three', p.firstTo.three);
+  addValues('pronostics.lastGoal', p.lastGoal);
+  addValues('pronostics.cleanSheet', p.cleanSheet);
+  addValues('simulation', {
+    home: bare.simulation.home,
+    draw: bare.simulation.draw,
+    away: bare.simulation.away,
+    over15: bare.simulation.over15,
+    over25: bare.simulation.over25,
+    over35: bare.simulation.over35,
+    btts: bare.simulation.btts,
+  });
+  check(
+    'moteur sans donnée externe : aucune probabilité hors bornes',
+    probabilities.length === 0,
+    probabilities.slice(0, 5).join(', ')
+  );
+  check(
+    'moteur sans donnée externe : les issues 1X2 de la simulation somment à 1',
+    close(bare.simulation.home + bare.simulation.draw + bare.simulation.away, 1, 2e-4),
+    `${(bare.simulation.home + bare.simulation.draw + bare.simulation.away).toFixed(6)}`
+  );
+  check(
+    'moteur sans donnée externe : issues 1X2 qui somment à 1',
+    close(bare.market.pureModel.home + bare.market.pureModel.draw + bare.market.pureModel.away, 1, 2e-4),
+    `${(bare.market.pureModel.home + bare.market.pureModel.draw + bare.market.pureModel.away).toFixed(6)}`
+  );
+  check(
+    'moteur sans donnée externe : confiance et intervalle fournis',
+    bare.confidence.probability > 0 &&
+      bare.confidence.probability < 1 &&
+      bare.uncertainty.home.low < bare.uncertainty.home.high
+  );
 }
 
 console.log('9. Pronostics dérivés (lecture de la simulation)');
