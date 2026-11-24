@@ -22,9 +22,25 @@ GET /api/analyze?league=eng.1&date=20261122[&match=401879234]
      chaque match contient `analyst` (8 modules, simulation) et
      `analyst.pronostics` (16 marchés dérivés)
 
-GET /api/health  -> état du service et joignabilité du moteur
-GET /api/meta    -> contrat de l'API
+GET /api/health    -> état du service et joignabilité du moteur
+GET /api/meta      -> contrat de l'API
+GET /api/leagues   -> catalogue des compétitions (calendrier du front)
+GET /api/fixtures  -> matchs d'une journée (calendrier du front)
+GET /api/analyze   -> analyse complète d'une journée ou d'un match
 ```
+
+### Calendrier du front
+
+Le front consomme deux routes pour le calendrier mensuel :
+
+- `GET /api/leagues` : les 16 compétitions (slug ESPN, nom, pays, niveau) ;
+- `GET /api/fixtures?league=eng.1&date=20261122` : les matchs de la
+  journée au format du front (`id`, `date`, `name`, `home`, `away`,
+  `venue`, `city`).
+
+Le calendrier demande une journée par jour du mois : les journées sont
+mises en cache 5 minutes (`ESPN_DAY_CACHE_TTL`) pour ne pas envoyer une
+trentaine de scoreboards à ESPN d'affilée.
 
 ## Résilience
 
