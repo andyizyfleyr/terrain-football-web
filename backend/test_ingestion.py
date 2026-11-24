@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -13,7 +14,9 @@ from espn import (  # noqa: E402
     _overall_summary,
     _side_summary,
     _stake_label,
+    CACHE_MAX_ENTRIES,
     fetch_standings,
+    prune_cache,
     select_form,
 )
 
@@ -395,6 +398,36 @@ check(
     "un slug valide n'est pas altéré",
     bool(seen) and "/soccer/eng.1/" in seen[0],
     str(seen),
+)
+
+print("9. Cache borné (durée ET nombre d'entrées)")
+# Sans purge, les caches ESPN grossiraient indéfiniment sur une instance
+# qui vit longtemps : chaque équipe, journée ou saison est une clé.
+cache = {}
+now = time.time()
+for i in range(600):
+    cache[f"equipe-{i}"] = {"at": now, "payload": {}}
+prune_cache(cache, 600.0)
+check(
+    "le cache est borné en nombre d'entrées",
+    len(cache) <= CACHE_MAX_ENTRIES,
+    f"{len(cache)} entrées (max {CACHE_MAX_ENTRIES})",
+)
+
+expired = {"vieux": {"at": now - 10_000, "payload": {}}}
+prune_cache(expired, 600.0)
+check(
+    "les entrées expirées sont supprimées",
+    len(expired) == 0,
+    f"{len(expired)} entrée(s) restante(s)",
+)
+
+fresh = {"recent": {"at": now, "payload": {}}}
+prune_cache(fresh, 600.0)
+check(
+    "les entrées encore valides sont conservées",
+    len(fresh) == 1,
+    f"{len(fresh)} entrée(s)",
 )
 
 print("")

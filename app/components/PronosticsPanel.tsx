@@ -98,6 +98,11 @@ export function PronosticsPanel({
             itérations) qui produit le score final. Un but compté « premier » est le même but que celui
             compté « dernier » ou celui du score à la mi-temps.
           </p>
+          <p className="pronosticsValidationNote">
+            Ces marchés sont des <strong>estimations du modèle</strong>. Ils n'ont pas tous été confrontés à des
+            cotes réelles : le statut de validation de chacun est publié dans la section « Marchés dérivés » du
+            rapport. Un marché sans cote de référence n'est pas une mesure, c'est une estimation.
+          </p>
         </div>
       ) : null}
 

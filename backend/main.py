@@ -81,8 +81,13 @@ def _normalize_date(value: str) -> str:
 
 async def call_analysis_service(
     client: httpx.AsyncClient, league: str, date_compact: str, matches: List[Dict[str, Any]]
-) -> Optional[Dict[str, Any]]:
-    """Demande l'analyse complète au moteur. None si le service est injoignable."""
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Demande l'analyse complète au moteur.
+
+    Renvoie (analyse, erreur). L'erreur suit le même contrat que
+    l'API Next.js : `code` stable, `retryable`, `detail` technique.
+    `None` signifie « le moteur a répondu, mais n'a rien pu analyser ».
+    """
     headers = {"Accept": "application/json"}
     if ENGINE_TOKEN:
         headers["Authorization"] = f"Bearer {ENGINE_TOKEN}"
@@ -93,11 +98,51 @@ async def call_analysis_service(
             headers=headers,
             timeout=ENGINE_TIMEOUT,
         )
-        if response.status_code != 200:
-            return None
-        return response.json()
-    except Exception:
-        return None
+    except httpx.TimeoutException as exc:
+        return None, {
+            "code": "upstream_timeout",
+            "retryable": True,
+            "error": "Le moteur d'analyse a mis trop de temps à répondre.",
+            "detail": str(exc),
+        }
+    except Exception as exc:  # pragma: no cover - dépend du réseau
+        return None, {
+            "code": "upstream_unavailable",
+            "retryable": True,
+            "error": "Le moteur d'analyse est momentanément injoignable.",
+            "detail": str(exc),
+        }
+
+    if response.status_code == 429:
+        return None, {
+            "code": "rate_limited",
+            "retryable": True,
+            "error": "Le moteur d'analyse refuse temporairement les requêtes.",
+            "detail": f"HTTP 429",
+        }
+    if response.status_code == 401:
+        return None, {
+            "code": "unauthorized",
+            "retryable": False,
+            "error": "Le jeton d'accès au moteur d'analyse est invalide.",
+            "detail": f"HTTP 401",
+        }
+    if response.status_code != 200:
+        return None, {
+            "code": "upstream_unavailable",
+            "retryable": response.status_code >= 500,
+            "error": f"Le moteur d'analyse a répondu {response.status_code}.",
+            "detail": f"HTTP {response.status_code}",
+        }
+    try:
+        return response.json(), None
+    except Exception as exc:  # pragma: no cover - réponse illisible
+        return None, {
+            "code": "upstream_unavailable",
+            "retryable": True,
+            "error": "La réponse du moteur d'analyse est illisible.",
+            "detail": str(exc),
+        }
 
 
 @app.get("/api/leagues")
@@ -388,9 +433,15 @@ async def analyze(
         base_matches = await build_base_matches(league, date_compact, match_ids or None)
 
         if not base_matches:
+            # Ce n'est pas une panne : la journée n'existe pas (repos
+            # international, compétition suspendue) ou aucune donnée
+            # n'a pu être collectée. Le contrat le distingue d'une erreur.
             return JSONResponse(
                 {
                     "error": "Aucune rencontre disponible pour cette journée.",
+                    "code": "no_data",
+                    "retryable": False,
+                    "degraded": True,
                     "league": league,
                     "date": date_compact,
                     "matches": [],
@@ -398,7 +449,16 @@ async def analyze(
                 status_code=404,
             )
 
-        analysis = await call_analysis_service(client, league, date_compact, base_matches)
+        engine_result = await call_analysis_service(
+            client, league, date_compact, base_matches
+        )
+        # Contrat : (analyse, erreur). On tolère aussi l'ancienne forme
+        # (analyse seule) pour qu'un remplacement de la fonction ne
+        # fasse pas tomber la route.
+        if isinstance(engine_result, tuple) and len(engine_result) == 2:
+            analysis, engine_error = engine_result
+        else:
+            analysis, engine_error = engine_result, None
 
     # L'analyse n'est « complète » que si le moteur a réellement produit
     # le bloc `analyst` (avec ses marchés dérivés). Sinon on renvoie les
@@ -421,19 +481,33 @@ async def analyze(
                 "date": date_compact,
                 "season": _season_of(date_compact),
                 "analysis": "complete",
+                "degraded": False,
                 "matches": engine_matches,
                 "sources": analysis.get("sources") or ["Données publiques"],
             }
         )
 
-    # Repli : le moteur est injoignable, on renvoie la couche brute et
-    # le front calculera l'analyse de son côté.
+    # Repli : le moteur est injoignable ou incomplet, on renvoie la
+    # couche brute et le front calculera l'analyse de son côté. La
+    # réponse est marquée « dégradée » et porte le code d'erreur, pour
+    # que l'interface explique la situation au lieu d'afficher un
+    # silence ou une panne indistincte.
+    error = engine_error or {
+        "code": "no_data",
+        "retryable": False,
+        "error": "Le moteur d'analyse n'a produit aucune analyse exploitable.",
+        "detail": "Réponse 200 sans bloc d'analyse complet.",
+    }
     return JSONResponse(
         {
             "league": league,
             "date": date_compact,
             "season": _season_of(date_compact),
             "analysis": None,
+            "degraded": True,
+            "error": error["error"],
+            "code": error["code"],
+            "retryable": error["retryable"],
             "matches": base_matches,
             "sources": ["Données publiques"],
         }

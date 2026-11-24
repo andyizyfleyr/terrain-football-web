@@ -69,7 +69,7 @@ import {
 } from './analystEngine';
 import { credibleInterval, poissonPmf } from './poissonModels';
 import type { CalibrationParams, CalibrationMetrics, ConfidenceBin, OutcomeProbs } from './calibration';
-import { applyCalibration } from './calibration';
+import { applyCalibration, MIN_MEANINGFUL_EDGE } from './calibration';
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -127,6 +127,20 @@ export type BacktestMatch = {
   homeXgot: number | null;
   awayXgot: number | null;
   odds: { home: number; draw: number; away: number } | null;
+  /**
+   * Cotes 1X2 par fournisseur (ex. Bet365, Pinnacle). Le triplet `odds`
+   * ci-dessus reste le marché de référence de la calibration.
+   */
+  oddsByProvider?: Record<string, { home: number; draw: number; away: number }>;
+  /**
+   * Marchés dérivés avec cotes réelles (validation des pronostics) :
+   * over/under 2,5, BTTS, Asian handicap.
+   */
+  derivedOdds?: {
+    over25?: { over: number; under: number };
+    btts?: { yes: number; no: number };
+    ah?: { line: number; home: number; away: number };
+  };
   provider: string | null;
   /** Joueurs absents annoncés avant le coup d'envoi (information publique). */
   unavailableHome: number[];
@@ -183,6 +197,17 @@ export type BacktestSample = {
   homeGoals: number;
   awayGoals: number;
   odds: { home: number; draw: number; away: number } | null;
+  /** Probabilité « plus de 2,5 buts » annoncée par le modèle. */
+  over25: number | null;
+  /** Probabilité « les deux équipes marquent » annoncée par le modèle. */
+  btts: number | null;
+  /**
+   * Probabilités dé-vigguées par fournisseur (ex. Bet365, Pinnacle).
+   * Permet de comparer plusieurs marchés sur le même jeu de rencontres.
+   */
+  markets: Record<string, OutcomeProbs>;
+  /** Cotes brutes 1X2 par fournisseur (pour le ROI). */
+  rawOdds: Record<string, { home: number; draw: number; away: number }>;
 };
 
 export type BacktestResult = {
@@ -252,7 +277,8 @@ function emptyAggregate(id: number, name: string): TeamAggregate {
  * par date pour l'évaluation conjointe.
  */
 export function buildWalkForwardInputs(
-  dataset: BacktestDataset
+  dataset: BacktestDataset,
+  options?: { simulationRuns?: number }
 ): { inputs: AnalystInput[]; naive: OutcomeProbs[] } {
   const matches = dataset.matches.slice().sort((a, b) => a.date.localeCompare(b.date));
 
@@ -271,7 +297,7 @@ export function buildWalkForwardInputs(
   // Rejeu indépendant par championnat.
   const byId = new Map<string, { input: AnalystInput; naive: OutcomeProbs }>();
   groups.forEach((group, league) => {
-    const built = buildLeagueWalkForward(group, snapshots, league);
+    const built = buildLeagueWalkForward(group, snapshots, league, options);
     group.forEach((match, index) => {
       byId.set(match.id, { input: built.inputs[index], naive: built.naive[index] });
     });
@@ -343,7 +369,8 @@ function emptyInput(match: BacktestMatch): AnalystInput {
 function buildLeagueWalkForward(
   leagueMatches: BacktestMatch[],
   snapshots: Map<number, BacktestTeamSnapshot>,
-  league: string
+  league: string,
+  options?: { simulationRuns?: number }
 ): { inputs: AnalystInput[]; naive: OutcomeProbs[] } {
   const matches = leagueMatches;
   const teamNames = new Map<number, string>();
@@ -358,8 +385,12 @@ function buildLeagueWalkForward(
   const inputs: AnalystInput[] = [];
   const naive: OutcomeProbs[] = [];
 
-  const historyFor = (id: number) =>
-    matches.filter(m => m.homeId === id || m.awayId === id);
+  // Historique d'une équipe RESTREINT aux rencontres déjà jouées.
+  // Cette liste ne doit contenir que les matchs antérieurs à la rencontre
+  // en cours de rejeu : prendre toute la saison revenait à laisser entrer
+  // dans le modèle des matchs postérieurs (fuite temporelle).
+  const historyFor = (id: number, prior: BacktestMatch[]) =>
+    prior.filter(m => m.homeId === id || m.awayId === id);
 
   for (let i = 0; i < matches.length; i++) {
     const match = matches[i];
@@ -487,8 +518,13 @@ function buildLeagueWalkForward(
     // référence qui les contient déjà.
     const naiveProbs = poissonOutcomeProbs(leagueHomeGoals, leagueAwayGoals);
 
+    // Forme récente : uniquement des matchs ANTERIEURS à la rencontre.
+    // On écarte aussi les matchs du même jour : l'heure de coup d'envoi
+    // n'est pas connue dans le jeu de données, donc leur ordre par
+    // rapport à la rencontre prédite n'est pas garanti.
     const recentFor = (id: number) =>
-      historyFor(id)
+      historyFor(id, history)
+        .filter(m => m.date < match.date)
         .slice()
         .sort((a, b) => a.date.localeCompare(b.date))
         .slice(-6)
@@ -602,19 +638,25 @@ function buildLeagueWalkForward(
     const input: AnalystInput = {
       matchId: match.id,
       kickoffIso: `${match.date}T15:00:00.000Z`,
+      simulationRuns: options?.simulationRuns,
       baseLambdas,
       covarianceSamples: priorForCovariance,
       halfTimeSamples: priorWithHalfTime,
       market: match.odds
         ? { ...match.odds, format: 'decimal', source: 'Backtest', providerLabel: match.provider }
         : null,
-      referee: match.referee
-        ? {
-            name: 'Arbitre backtest',
-            ...match.referee,
-          }
-        : null,
-      weather: match.weather ?? null,
+      // ANTI-FUITE : ni l'arbitre ni la météo ne sont utilisés dans le
+      // rejeu. Le profil d'arbitre collecté est un cumul de carrière lu
+      // à la date de collecte : il inclut les matchs POSTÉRIEURS à la
+      // rencontre prédite. La météo collectée est la météo RÉELLE du
+      // match, qui n'est pas une information d'avant-match (seule la
+      // prévision l'est, et elle n'est pas conservée).
+      // Impact mesuré sur le jeu de référence : log-loss 1,0576 → 1,0573
+      // (sans arbitre ni météo) : négligeable, la correction est donc
+      // sans risque. En production, l'analyse d'un match à venir utilise
+      // bien l'arbitre désigné et la prévision météo.
+      referee: null,
+      weather: null,
       h2h: null,
       league: { rowsAll, rowsHome, rowsAway, xgRows: rowsAll, legend: [], name: league },
       home: {
@@ -713,11 +755,17 @@ function topPick(probs: OutcomeProbs): 0 | 1 | 2 {
 
 export function runBacktest(
   dataset: BacktestDataset,
-  options?: { maxMatches?: number; calibration?: Partial<CalibrationParams> }
+  options?: {
+    maxMatches?: number;
+    calibration?: Partial<CalibrationParams>;
+    simulationRuns?: number;
+  }
 ): BacktestResult {
   const matches = dataset.matches.slice().sort((a, b) => a.date.localeCompare(b.date));
   const limit = options?.maxMatches ?? matches.length;
-  const { inputs, naive } = buildWalkForwardInputs(dataset);
+  const { inputs, naive } = buildWalkForwardInputs(dataset, {
+    simulationRuns: options?.simulationRuns,
+  });
 
   const samples: BacktestSample[] = [];
   const start = Math.max(0, matches.length - limit);
@@ -744,6 +792,22 @@ export function runBacktest(
       ? { home: devig.probs.home, draw: devig.probs.draw, away: devig.probs.away }
       : null;
 
+    // Marchés additionnels (Bet365, Pinnacle, moyenne) : chacun est
+    // dé-viggué séparément pour être comparable.
+    const markets: Record<string, OutcomeProbs> = {};
+    const rawOdds: Record<string, { home: number; draw: number; away: number }> = {};
+    for (const [provider, triple] of Object.entries(match.oddsByProvider || {})) {
+      if (!triple || !Number.isFinite(triple.home) || !Number.isFinite(triple.draw) || !Number.isFinite(triple.away)) continue;
+      const providerDevig = devigThreeWayDecimal(triple);
+      if (!providerDevig) continue;
+      markets[provider] = {
+        home: providerDevig.probs.home,
+        draw: providerDevig.probs.draw,
+        away: providerDevig.probs.away,
+      };
+      rawOdds[provider] = { ...triple };
+    }
+
     const outcome: 0 | 1 | 2 =
       match.homeGoals > match.awayGoals ? 0 : match.homeGoals === match.awayGoals ? 1 : 2;
 
@@ -762,6 +826,10 @@ export function runBacktest(
       homeGoals: match.homeGoals,
       awayGoals: match.awayGoals,
       odds: match.odds,
+      over25: Number.isFinite(report.market.pureModel.over25) ? report.market.pureModel.over25 : null,
+      btts: Number.isFinite(report.market.pureModel.btts) ? report.market.pureModel.btts : null,
+      markets,
+      rawOdds,
     });
   }
 
@@ -820,6 +888,28 @@ export function fitBlendParams(
  * Log-loss calibrée hors échantillon : pour chaque bloc, les paramètres
  * sont ajustés sur les autres blocs puis évalués sur le bloc écarté.
  */
+/**
+ * Répartit les échantillons en blocs TEMPORELS contigus.
+ *
+ * L'ancien découpage (`index % folds`) entrelaçait les blocs : un match
+ * était évalué avec des matchs du même échantillon situés APRÈS lui,
+ * donc la validation croisée laissait passer de l'information future.
+ * Ici, une fois les échantillons triés par date, l'indice de bloc est
+ * croissant : chaque bloc couvre une période continue.
+ */
+export function temporalFoldIndex(samples: BacktestSample[], folds: number): number[] {
+  const result = new Array(samples.length).fill(0);
+  if (samples.length === 0 || folds < 2) return result;
+  const order = samples
+    .map((_, index) => index)
+    .sort((a, b) => samples[a].date.localeCompare(samples[b].date));
+  const size = Math.max(1, Math.floor(order.length / folds));
+  order.forEach((sampleIndex, position) => {
+    result[sampleIndex] = Math.min(folds - 1, Math.floor(position / size));
+  });
+  return result;
+}
+
 export function crossValidatedLogLoss(samples: BacktestSample[], folds: number): number {
   if (samples.length < 20 || folds < 2) {
     let loss = 0;
@@ -832,11 +922,12 @@ export function crossValidatedLogLoss(samples: BacktestSample[], folds: number):
     return samples.length ? loss / samples.length : 0;
   }
 
+  const foldIndex = temporalFoldIndex(samples, folds);
   let total = 0;
   let count = 0;
   for (let fold = 0; fold < folds; fold++) {
-    const train = samples.filter((_, index) => index % folds !== fold);
-    const test = samples.filter((_, index) => index % folds === fold);
+    const train = samples.filter((_, index) => foldIndex[index] !== fold);
+    const test = samples.filter((_, index) => foldIndex[index] === fold);
     if (!train.length || !test.length) continue;
     const best = fitBlendParams(train);
     if (!best) continue;
@@ -851,6 +942,49 @@ export function crossValidatedLogLoss(samples: BacktestSample[], folds: number):
     }
   }
   return count ? total / count : 0;
+}
+
+/**
+ * Log-loss en marche avant STRICTE : chaque bloc est évalué avec une
+ * calibration ajustée uniquement sur les blocs qui le PRÉCÈDENT dans le
+ * temps. Aucun match n'est donc jamais évalué avec une calibration
+ * qui a vu son avenir.
+ *
+ * Le premier bloc n'a pas d'historique d'ajustement : il n'est pas
+ * évalué. Le résultat indique donc combien de rencontres ont été
+ * effectivement couvertes.
+ */
+export function walkForwardLogLoss(
+  samples: BacktestSample[],
+  folds: number
+): { loss: number; evaluated: number; covered: number } {
+  if (samples.length < 20 || folds < 2) {
+    return { loss: crossValidatedLogLoss(samples, folds), evaluated: samples.length, covered: samples.length };
+  }
+  const foldIndex = temporalFoldIndex(samples, folds);
+  let total = 0;
+  let evaluated = 0;
+  for (let fold = 1; fold < folds; fold++) {
+    const train = samples.filter((_, index) => foldIndex[index] < fold);
+    const test = samples.filter((_, index) => foldIndex[index] === fold);
+    if (!train.length || !test.length) continue;
+    const best = fitBlendParams(train);
+    if (!best) continue;
+    for (const sample of test) {
+      const probs = applyCalibration(
+        sample.model,
+        sample.market,
+        { sharpness: best.sharpness, modelWeight: best.weight } as CalibrationParams
+      ).probs;
+      total += logLoss(probs, sample.outcome);
+      evaluated += 1;
+    }
+  }
+  return {
+    loss: evaluated ? total / evaluated : 0,
+    evaluated,
+    covered: samples.length,
+  };
 }
 
 export function evaluateSamples(
@@ -870,9 +1004,13 @@ export function evaluateSamples(
   const edgeBuckets = computeEdgeBuckets(samples, modelWeight, sharpness);
   const derived = deriveValueThreshold(samples, modelWeight, sharpness);
   const valueThreshold = calibrationOverride?.valueThreshold ?? derived.threshold;
+  // Le seuil n'est « démontré » que si l'ajustement a trouvé un seuil dont
+  // le ROI cumulé est positif sur l'historique. Sinon la détection de
+  // valeur reste inactive (voir valueAssessment).
+  const valueThresholdDemonstrated = derived.demonstrated;
   if (!derived.demonstrated) {
     notes.push(
-      `Aucun seuil d\'edge ne démontre un ROI positif sur cet échantillon (${derived.bets} pari(s) à edge positif, ROI ${((derived.roi ?? 0) * 100).toFixed(1)} %). Le seuil de valeur retenu est le seuil minimal : le signal « valeur » n\'est PAS validé empiriquement.`
+      `Aucun seuil d\'edge ne démontre un ROI positif sur cet échantillon (${derived.bets} pari(s) à edge positif, ROI ${((derived.roi ?? 0) * 100).toFixed(1)} %). Le signal « valeur » reste INACTIF : il n\'est pas validé empiriquement.`
     );
   }
 
@@ -919,6 +1057,7 @@ export function evaluateSamples(
   // capacité à se généraliser.
   const folds = samples.length >= 100 ? 5 : samples.length >= 40 ? 4 : 3;
   const crossValidated = crossValidatedLogLoss(samples, folds);
+  const walkForward = walkForwardLogLoss(samples, folds);
   const metrics: CalibrationMetrics = {
     sampleSize: samples.length,
     league: dataset.league,
@@ -928,6 +1067,8 @@ export function evaluateSamples(
     calibratedLogLoss: Number(crossValidated.toFixed(4)),
     calibratedLogLossInSample: Number((calibratedLoss / n).toFixed(4)),
     crossValidationFolds: folds,
+    walkForwardLogLoss: Number(walkForward.loss.toFixed(4)),
+    walkForwardEvaluated: walkForward.evaluated,
     naiveLogLoss: Number((naiveLoss / n).toFixed(4)),
     brier: Number((brier / n).toFixed(4)),
     accuracy: Number((correct / n).toFixed(4)),
@@ -948,7 +1089,10 @@ export function evaluateSamples(
     );
   }
   notes.push(
-    `Log-loss : modèle pur ${metrics.modelLogLoss} · calibré hors échantillon ${metrics.calibratedLogLoss} (in-sample ${metrics.calibratedLogLossInSample}, ${metrics.crossValidationFolds} blocs) · marché ${metrics.marketLogLoss ?? '—'} · naïf ${metrics.naiveLogLoss}.`
+    `Log-loss : modèle pur ${metrics.modelLogLoss} · calibré hors échantillon ${metrics.calibratedLogLoss} (in-sample ${metrics.calibratedLogLossInSample}, ${metrics.crossValidationFolds} blocs temporels) · marché ${metrics.marketLogLoss ?? '—'} · naïf ${metrics.naiveLogLoss}.`
+  );
+  notes.push(
+    `Marche avant stricte : ${metrics.walkForwardLogLoss} sur ${metrics.walkForwardEvaluated} rencontre(s) évaluées avec une calibration ajustée uniquement sur les blocs PRÉCÉDENTS (aucun match n’est évalué avec une calibration qui a vu son avenir).`
   );
   notes.push(
     'Ajustement sans fuite temporelle : seuls les cumuls antérieurs, les absences et les compositions confirmées sont utilisés ; les totaux de saison collectés après coup sont exclus.'
@@ -962,10 +1106,11 @@ export function evaluateSamples(
   }
 
   const params: CalibrationParams = {
-    version: '3.0',
+    version: '3.1',
     modelWeight: Number(modelWeight.toFixed(4)),
     sharpness: Number(sharpness.toFixed(4)),
     valueThreshold: Number(valueThreshold.toFixed(4)),
+    valueThresholdDemonstrated,
     effectiveSampleSize: Number(effectiveSampleSize.toFixed(2)),
     logistic,
     confidenceBins,
@@ -1090,7 +1235,12 @@ function computeValueRoi(
       { index: 2, edge: calibrated.away - sample.market.away, odds: sample.odds.away },
     ];
     const best = picks.sort((a, b) => b.edge - a.edge)[0];
-    if (best.edge < threshold) continue;
+    // Même définition d'un « pari » que la production (valueAssessment) :
+    // un écart strictement positif ET au-dessus du seuil. Sans cette
+    // contrainte, un écart nul (mélange = marché) comptait comme un pari
+    // et le ROI mesuré était celui de la marge du bookmaker, pas celui
+    // d'une stratégie de valeur.
+    if (!(best.edge > MIN_MEANINGFUL_EDGE) || best.edge < threshold) continue;
     bets += 1;
     returns += best.index === sample.outcome ? best.odds - 1 : -1;
   }
@@ -1195,11 +1345,16 @@ function buildConfidenceBins(
 ): ConfidenceBin[] {
   const edges = [0, 0.15, 0.3, 0.45, 0.6, 1.01];
   const bins: ConfidenceBin[] = [];
+  // La tranche doit décrire la MÊME chose que la confiance affichée : on
+  // utilise donc exactement la formule de `calibratedConfidence`, terme
+  // `marketPick` compris. Sans lui, les tranches mesuraient une autre
+  // grandeur que celle affichée à l'utilisateur.
   const scored = samples.map(sample => {
     const z =
       logistic.intercept +
       logistic.separation * sample.separation +
-      logistic.agreement * sample.agreement;
+      logistic.agreement * sample.agreement +
+      (logistic.marketPick ?? 0) * (sample.marketPick ?? 0);
     const p = 1 / (1 + Math.exp(-z));
     return { p, hit: topPick(sample.model) === sample.outcome };
   });
@@ -1207,13 +1362,15 @@ function buildConfidenceBins(
   for (let i = 0; i < edges.length - 1; i++) {
     const slice = scored.filter(row => row.p >= edges[i] && row.p < edges[i + 1]);
     const hits = slice.filter(row => row.hit).length;
+    // Une tranche sans échantillon n'a AUCUNE probabilité mesurée :
+    // on la laisse vide plutôt que d'y mettre une valeur inventée.
     const probability = slice.length
       ? Math.max(0.05, Math.min(0.95, (hits + 1) / (slice.length + 4)))
-      : (edges[i] + edges[i + 1]) / 2;
+      : null;
     bins.push({
       min: Number(edges[i].toFixed(3)),
       max: Number(edges[i + 1].toFixed(3)),
-      probability: Number(probability.toFixed(4)),
+      probability: probability === null ? null : Number(probability.toFixed(4)),
       samples: slice.length,
     });
   }

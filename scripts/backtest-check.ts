@@ -5,18 +5,20 @@
  * (app/lib/backtestDataset.ts) avec la seule information disponible avant
  * chaque coup d'envoi. On vérifie :
  *   1. que le jeu de données est exploitable (taille, cotes, xG) ;
- *   2. que l'ajustement est REPRODUCTIBLE (deux exécutions → mêmes
+ *   2. qu'aucune information postérieure au coup d'envoi n'entre dans le
+ *      replay (forme récente strictement antérieure) ;
+ *   3. que l'ajustement est REPRODUCTIBLE (deux exécutions → mêmes
  *      paramètres) ;
- *   3. que les paramètres versionnés dans calibrationParams.ts
+ *   4. que les paramètres versionnés dans calibrationParams.ts
  *      correspondent à l'ajustement (tolérance 1e-3) ;
- *   4. que le modèle calibré n'est pas moins bon que la référence naïve ;
- *   5. que la calibration published reste dans des bornes sanaires.
+ *   5. que le modèle calibré n'est pas moins bon que la référence naïve ;
+ *   6. que la calibration published reste dans des bornes sanaires.
  *
  * Exécution : npm run check:backtest
  */
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { COMBINED_BACKTEST_DATASET } from '../app/lib/backtestDatasetCombined.ts';
-import { runBacktest } from '../app/lib/backtest.ts';
+import { buildWalkForwardInputs, runBacktest, temporalFoldIndex, type BacktestDataset } from '../app/lib/backtest.ts';
 import { DEFAULT_CALIBRATION } from '../app/lib/calibrationParams.ts';
 
 const WRITE = process.argv.includes('--write');
@@ -89,7 +91,117 @@ check(
   `${teamIds.length} équipes, ${new Set(teamIds).size} identifiants uniques`
 );
 
-console.log('2. Rejeu du moteur (walk-forward)');
+console.log('2. Absence de fuite temporelle');
+/*
+ * Non-régression : la forme récente ne doit contenir QUE des matchs
+ * antérieurs à la rencontre prédite. La version corrigée limitait la
+ * recherche à l'historique déjà joué ; la version d'origine prenait les
+ * 6 derniers matchs de la saison, donc y compris des matchs postérieurs
+ * (70 % des entrées de forme venaient du futur).
+ */
+
+// (a) Cas synthétique : une équipe qui joue après la rencontre prédite.
+const syntheticMatch = (
+  id: string,
+  date: string,
+  homeId: number,
+  awayId: number,
+  homeGoals: number,
+  awayGoals: number
+) => ({
+  id,
+  date,
+  league: 'test.1',
+  homeId,
+  homeName: `Équipe ${homeId}`,
+  awayId,
+  awayName: `Équipe ${awayId}`,
+  homeGoals,
+  awayGoals,
+  homeXg: null,
+  awayXg: null,
+  htHome: null,
+  htAway: null,
+  homeShots: null,
+  awayShots: null,
+  homeXgot: null,
+  awayXgot: null,
+  odds: null,
+  provider: null,
+  unavailableHome: [],
+  unavailableAway: [],
+  startersHome: [],
+  startersAway: [],
+});
+const syntheticDataset: BacktestDataset = {
+  league: 'test.1',
+  period: 'synthétique',
+  teams: [],
+  matches: [
+    syntheticMatch('s1', '2026-01-10', 1, 2, 1, 0),
+    syntheticMatch('s2', '2026-01-17', 1, 3, 2, 2),
+    syntheticMatch('s3', '2026-01-24', 4, 1, 0, 3),
+    syntheticMatch('s4', '2026-01-31', 1, 2, 1, 1),
+  ],
+};
+const syntheticInputs = buildWalkForwardInputs(syntheticDataset).inputs;
+const syntheticFirst = syntheticInputs[0];
+check(
+  'forme récente vide quand aucun match antérieur n’existe',
+  syntheticFirst.home.recentMatches.length === 0 &&
+    syntheticFirst.away.recentMatches.length === 0,
+  `${syntheticFirst.home.recentMatches.length} / ${syntheticFirst.away.recentMatches.length}`
+);
+const syntheticSecond = syntheticInputs[1];
+check(
+  'forme récente limitée aux matchs antérieurs (cas synthétique)',
+  syntheticSecond.home.recentMatches.length === 1 &&
+    syntheticSecond.home.recentMatches[0].utcTime.startsWith('2026-01-10'),
+  syntheticSecond.home.recentMatches.map(m => m.utcTime).join(', ') || 'vide'
+);
+const syntheticThird = syntheticInputs[2];
+const syntheticThirdDates = syntheticThird.away.recentMatches.map(m => m.utcTime.slice(0, 10));
+check(
+  'forme récente exclut le match en cours et les suivants (cas synthétique)',
+  syntheticThirdDates.length === 2 &&
+    syntheticThirdDates.join(',') === '2026-01-10,2026-01-17',
+  syntheticThirdDates.join(', ') || 'vide'
+);
+
+// (b) Cas réel : le jeu de données de référence ne doit contenir aucune
+// entrée de forme postérieure à la rencontre prédite.
+const walkForward = buildWalkForwardInputs(dataset);
+const dateByMatchId = new Map(dataset.matches.map(m => [m.id, m.date]));
+let formEntries = 0;
+let futureEntries = 0;
+const futureExamples: string[] = [];
+for (const input of walkForward.inputs) {
+  const matchDate = dateByMatchId.get(input.matchId);
+  for (const team of [input.home, input.away]) {
+    for (const recent of team.recentMatches) {
+      formEntries += 1;
+      const recentDate = String(recent.utcTime).slice(0, 10);
+      if (!matchDate || recentDate >= matchDate) {
+        futureEntries += 1;
+        if (futureExamples.length < 3) {
+          futureExamples.push(`${input.matchId} (${matchDate}) utilise ${recentDate}`);
+        }
+      }
+    }
+  }
+}
+check(
+  'aucune entrée de forme postérieure à la rencontre prédite',
+  futureEntries === 0,
+  `${futureEntries}/${formEntries} entrées futures${futureExamples.length ? ' — ex. ' + futureExamples.join(' ; ') : ''}`
+);
+check(
+  'la forme récente est bien alimentée (test non vide)',
+  formEntries > 0,
+  `${formEntries} entrées de forme sur ${walkForward.inputs.length} matchs`
+);
+
+console.log('3. Rejeu du moteur (walk-forward)');
 const started = Date.now();
 const result = runBacktest(dataset);
 const elapsed = Date.now() - started;
@@ -103,10 +215,13 @@ check(
   )
 );
 
-console.log('3. Métriques');
+console.log('4. Métriques');
 const m = result.metrics;
 console.log(
-  `     log-loss : modèle ${m.modelLogLoss} · calibré hors échantillon ${m.calibratedLogLoss} (in-sample ${m.calibratedLogLossInSample}, ${m.crossValidationFolds} blocs) · marché ${m.marketLogLoss ?? '—'} · naïf ${m.naiveLogLoss}`
+  `     log-loss : modèle ${m.modelLogLoss} · calibré hors échantillon ${m.calibratedLogLoss} (in-sample ${m.calibratedLogLossInSample}, ${m.crossValidationFolds} blocs temporels) · marché ${m.marketLogLoss ?? '—'} · naïf ${m.naiveLogLoss}`
+);
+console.log(
+  `     marche avant stricte : ${m.walkForwardLogLoss} sur ${m.walkForwardEvaluated}/${m.sampleSize} rencontres évaluées sans jamais voir l’avenir`
 );
 console.log(`     Brier ${m.brier} · accuracy ${(m.accuracy * 100).toFixed(1)} % · ROI valeur ${m.valueRoi ?? '—'}`);
 console.log(
@@ -125,10 +240,52 @@ check(
   m.crossValidationFolds >= 3,
   `${m.crossValidationFolds} blocs`
 );
+// Non-régression : les blocs de validation croisée doivent être
+// CONTIGUS dans le temps. L'ancien découpage entrelacé
+// (`index % folds`) evalait un match avec des matchs postérieurs.
+const foldIndex = temporalFoldIndex(result.samples, m.crossValidationFolds);
+const byDate = result.samples
+  .map((sample, index) => ({ date: sample.date, fold: foldIndex[index] }))
+  .sort((a, b) => a.date.localeCompare(b.date));
+check(
+  'blocs de validation croisée contigus dans le temps',
+  byDate.every((row, index) => index === 0 || row.fold >= byDate[index - 1].fold),
+  `blocs : ${Array.from(new Set(byDate.map(r => r.fold))).join(', ')}`
+);
+check(
+  'marche avant stricte : log-loss calculée',
+  Number.isFinite(m.walkForwardLogLoss) && m.walkForwardLogLoss > 0,
+  `${m.walkForwardLogLoss}`
+);
+check(
+  'marche avant stricte : le premier bloc reste non évalué',
+  m.walkForwardEvaluated > 0 && m.walkForwardEvaluated < m.sampleSize,
+  `${m.walkForwardEvaluated}/${m.sampleSize}`
+);
 check(
   'log-loss in-sample ≤ log-loss hors échantillon',
   m.calibratedLogLossInSample <= m.calibratedLogLoss + 1e-6,
   `in-sample ${m.calibratedLogLossInSample} vs hors échantillon ${m.calibratedLogLoss}`
+);
+// Non-régression : un mélange dont le poids de modèle est nul REPRODUIT le
+// marché. Aucun écart n'est alors significatif, donc aucun pari « valeur »
+// ne doit être compté (avant correction, 229 paris au bruit de calcul
+// étaient comptés et un ROI de +6,5 % était publié).
+const marketOnly = runBacktest(dataset, { calibration: { modelWeight: 0, sharpness: 1 } });
+check(
+  'un mélange égal au marché ne produit aucun pari « valeur »',
+  marketOnly.metrics.valueBets === 0 && marketOnly.metrics.valueRoi === null,
+  `${marketOnly.metrics.valueBets} pari(s), ROI ${marketOnly.metrics.valueRoi ?? '—'}`
+);
+check(
+  'le ROI publié repose toujours sur des paris comptabilisés',
+  m.valueRoi === null || m.valueBets > 0,
+  `ROI ${m.valueRoi ?? '—'} sur ${m.valueBets} pari(s)`
+);
+check(
+  'le seuil de valeur est inactif quand il n’est pas démontré',
+  result.params.valueThresholdDemonstrated === false ? m.valueBets === 0 : true,
+  `démontré=${result.params.valueThresholdDemonstrated} · ${m.valueBets} pari(s)`
 );
 check(
   'le modèle calibré bat la référence naïve',
@@ -141,7 +298,7 @@ check(
   `calibré=${m.calibratedLogLoss} marché=${m.marketLogLoss}`
 );
 
-console.log('4. Reproductibilité de l’ajustement');
+console.log('5. Reproductibilité de l’ajustement');
 const second = runBacktest(dataset);
 check(
   'poids modèle reproductible',
@@ -159,7 +316,7 @@ check(
   `${second.params.valueThreshold} vs ${result.params.valueThreshold}`
 );
 
-console.log('5. Paramètres versionnés');
+console.log('6. Paramètres versionnés');
 const committed = DEFAULT_CALIBRATION;
 if (committed.metrics.sampleSize === 0) {
   console.log('  note   calibration non encore versionnée (précalibrage) — nothing to compare');
@@ -192,7 +349,7 @@ if (committed.metrics.sampleSize === 0) {
   );
 }
 
-console.log('6. Bornes de sécurité');
+console.log('7. Bornes de sécurité');
 check(
   'poids modèle dans [0,1]',
   result.params.modelWeight >= 0 && result.params.modelWeight <= 1,
@@ -218,12 +375,60 @@ if (WRITE && (!failures || FORCE)) {
   // Réécriture des paramètres versionnés à partir de l'ajustement.
   const p = result.params;
   const bins = p.confidenceBins
-    .map(b => `    { min: ${b.min}, max: ${b.max}, probability: ${b.probability}, samples: ${b.samples} },`)
+    .map(
+      b =>
+        `    { min: ${b.min}, max: ${b.max}, probability: ${b.probability === null ? 'null' : b.probability}, samples: ${b.samples} },`
+    )
     .join('\n');
   // Le ROI est rendu hors du gabarit : un guillemet simple dans le
   // texte généré casserait la chaîne de la limitation.
   const roiText =
     p.metrics.valueRoi === null ? '—' : `${(p.metrics.valueRoi * 100).toFixed(1)} %`;
+
+  // Validation à grande échelle : le rapport strict (14 608 rencontres,
+  // 5 championnats, 8 saisons) est lu S'IL EXISTE. Sans lui, aucun bloc
+  // n'est écrit : les métriques publiées restent celles du seul
+  // ajustement de production.
+  const reportPath = 'data/backtest-report.json';
+  let scaleValidationBlock = '';
+  let scaleValidationNote = '';
+  if (existsSync(reportPath)) {
+    try {
+      const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
+      const pick = (name: string) =>
+        (report.global?.reports || []).find((entry: any) => entry.name === name);
+      const calibrated = pick('modèle calibré');
+      const market = pick('moyenne marché');
+      const raw = pick('modèle brut');
+      const pinnacle = pick('Pinnacle dé-viggué');
+      const roi = report.global?.roi || {};
+      if (calibrated && market) {
+        scaleValidationBlock = [
+          '    // Validation à grande échelle (football-data.co.uk).',
+          '    scaleValidation: {',
+          `      sampleSize: ${calibrated.logLoss.samples},`,
+          `      leagues: '${Object.keys(report.perLeague || {}).join(', ')}',`,
+          `      period: '${report.dataset?.period || ''}',`,
+          `      modelLogLoss: ${raw?.logLoss?.value ?? 0},`,
+          `      calibratedLogLoss: ${calibrated.logLoss.value},`,
+          `      marketLogLoss: ${market.logLoss.value},`,
+          `      pinnacleLogLoss: ${pinnacle?.logLoss?.value ?? 0},`,
+          `      accuracy: ${calibrated.accuracy.value},`,
+          `      brier: ${calibrated.brier.value},`,
+          `      valueBets: ${roi.bets ?? 0},`,
+          `      valueRoi: ${roi.roi === null || roi.roi === undefined ? 'null' : roi.roi},`,
+          `      valueDemonstrated: ${(roi.bets ?? 0) > 0},`,
+          '    },',
+        ].join('\n');
+        scaleValidationNote = `    'VALIDATION À GRANDE ÉCHELLE (football-data.co.uk, ${calibrated.logLoss.samples} rencontres, ${Object.keys(report.perLeague || {}).length} championnats, ${report.dataset?.seasons?.length || 0} saisons, cotes Bet365 et Pinnacle) : le modèle calibré atteint une log-loss de ${calibrated.logLoss.value} contre ${market.logLoss.value} pour la moyenne de marché dé-vigguée. Le modèle pur (non calibré) atteint ${raw?.logLoss?.value ?? '—'}, soit mieux que le tirage aléatoire (1,0986) mais moins bon que le marché. CONCLUSION : à cette échelle, le modèle n\'est PAS meilleur que le marché, et aucun pari à « valeur » ne survit au seuil de 2 points (${roi.bets ?? 0} pari retenu). Ce rejeu ne dispose ni des xG ni des statistiques de joueurs : c\'est une borne INFÉRIEURE de la performance du moteur de production, et un échantillon 60 fois plus grand que celui du calibrage publié.',`;
+        scaleValidationNote += `    'Les cotes employées dans cette validation sont des cotes d\'OUVERTURE (avant le coup d\'envoi) : l\'archive football-data.co.uk ne publie pas de cotes de clôture pour les saisons 0809 à 1516. Les conclusions sur la marge des bookmakers doivent donc être formulées en référence à des cotes d\'ouverture.',`;
+        scaleValidationNote += `    'Deux défauts de référence ont été corrigés grâce à cette validation : (1) sans données xG, la référence de buts attendus était rétrécie vers une moyenne de xG nulle, ce qui faisait s\'effondrer les buts attendus (0,53 au lieu de 1,63) ; (2) l\'absence de données tactiques était traitée comme un style « peu offensif » (tempo 0,88), ce qui retirait 12 % des buts attendus alors que la moyenne réelle du championnat est de 2,76. Une donnée absente n\'est jamais traitée comme une preuve.',`;
+      }
+    } catch {
+      scaleValidationBlock = '';
+      scaleValidationNote = '';
+    }
+  }
   const content = `/* ------------------------------------------------------------------ */
 /* PARAMÈTRES DE CALIBRATION (ajustés sur backtest walk-forward)       */
 /* ------------------------------------------------------------------ */
@@ -238,6 +443,18 @@ if (WRITE && (!failures || FORCE)) {
  * par championnat (aucun classement, aucune moyenne et aucun xG n'est
  * partagé entre les deux divisions).
  *
+ * ATTENTION — la forme récente ne voit QUE les matchs antérieurs à la
+ * rencontre prédite (correction de la fuite temporelle du 2026-11-23).
+ * Avant cette correction, 70 % des entrées de forme venaient de matchs
+ * postérieurs : l'ajustement était optimiste et le ROI « valeur » était
+ * un artefact.
+ *
+ * Sur l'échantillon actuel, l'ajustement choisit un poids de modèle de
+ * ${p.modelWeight}. C'est un résultat de MESURE, pas un choix : sur
+ * ${p.metrics.sampleSize} rencontres, le modèle n'apporte rien de mesurable
+ * par-dessus le marché dé-viggué. L'ajustement reste PROVISOIRE tant que
+ * l'échantillon de référence n'est pas élargi.
+ *
  * Pour ouvrir un nouveau calibrage :
  *   1. rafraîchir le jeu de données (route /api/backtest-data) ;
  *   2. lancer \`npm run check:backtest -- --write\` pour réécrire ce fichier ;
@@ -250,10 +467,11 @@ if (WRITE && (!failures || FORCE)) {
 import type { CalibrationParams } from './calibration';
 
 export const DEFAULT_CALIBRATION: CalibrationParams = {
-  version: '3.0',
+  version: '3.1',
   modelWeight: ${p.modelWeight},
   sharpness: ${p.sharpness},
   valueThreshold: ${p.valueThreshold},
+  valueThresholdDemonstrated: ${p.valueThresholdDemonstrated ?? false},
   effectiveSampleSize: ${p.effectiveSampleSize},
   logistic: {
     intercept: ${p.logistic.intercept},
@@ -273,22 +491,29 @@ ${bins}
     calibratedLogLoss: ${p.metrics.calibratedLogLoss},
     calibratedLogLossInSample: ${p.metrics.calibratedLogLossInSample},
     crossValidationFolds: ${p.metrics.crossValidationFolds},
+    walkForwardLogLoss: ${p.metrics.walkForwardLogLoss},
+    walkForwardEvaluated: ${p.metrics.walkForwardEvaluated},
     naiveLogLoss: ${p.metrics.naiveLogLoss},
     brier: ${p.metrics.brier},
     accuracy: ${p.metrics.accuracy},
     valueRoi: ${p.metrics.valueRoi},
     valueBets: ${p.metrics.valueBets},
     valueThreshold: ${p.metrics.valueThreshold},
+${scaleValidationBlock}
   },
   dataset: '${p.dataset}',
   fittedAt: '${p.fittedAt}',
   limitations: [
+    'Ajustement SANS fuite temporelle : la forme récente ne contient que des matchs antérieurs à la rencontre prédite (correction du 2026-11-23). L’ajustement précédent, obtenu avec une forme incluant des matchs postérieurs, était optimiste et a été remplacé.',
+    'Sur cet échantillon, le poids de modèle ajusté vaut ${p.modelWeight} : le marché dé-viggué seul est au moins aussi bon que le mélange. La calibration reste PROVISOIRE tant que l’échantillon de référence n’est pas élargi à plusieurs saisons et plusieurs divisions.',
     'Le backtest rejoue le moteur sans les contributions individuelles des joueurs (xG, xA, minutes) ni la pondération du onze titulaire : les statistiques de joueur et les titulaires ne sont pas stockés dans le jeu de données de référence (ils seraient collectés après la rencontre). Le poids du modèle ajusté est donc une borne INFÉRIEURE de celui du modèle en production.',
     'La série de marché provient d’un seul fournisseur (Bet365) sur un échantillon de ${p.metrics.sampleSize} rencontres : l’incertitude sur le poids ajusté reste importante (ordre de grandeur : ±0,1).',
     'Évalué HORS ÉCHANTILLON (validation croisée à ${p.metrics.crossValidationFolds} blocs), le modèle calibré obtient une log-loss de ${p.metrics.calibratedLogLoss} contre ${p.metrics.marketLogLoss} pour le marché dé-viggué : sur cet échantillon, la calibration NE FAIT PAS MIEUX QUE LE MARCHÉ. La valeur in-sample (${p.metrics.calibratedLogLossInSample}) est optimiste et ne doit jamais être citée seule.',
     'Le seuil de « valeur » est dérivé de tranches de 2 points de probabilité : avec ${p.metrics.valueBets} pari(s) sur l’échantillon (ROI ${roiText}), ce seuil reste indicatif et n’est PAS une preuve de rentabilité : il doit être réajusté sur un échantillon plus large.',
+    'Le signal « valeur » est INACTIF tant qu’aucun seuil n’est démontré (valueThresholdDemonstrated = false) : sans seuil démontré, tout écart strictement positif serait déclaré « valeur », y compris le simple bruit de calcul d’un mélange dont le poids de modèle est nul.',
     'Les totaux de saison (équipes et joueurs) sont exclus de l’ajustement pour éviter toute fuite temporelle.',
     'L’échantillon couvre deux championnats (${p.metrics.league}) mais un seul jeu de paramètres : ceux-ci sont communs aux deux divisions.',
+${scaleValidationNote}
   ],
 };
 `;

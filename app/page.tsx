@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MatchAnalysisPanel } from './components/MatchAnalysisPanel';
+import { apiFetch, type ClientError } from './lib/clientApi';
 import { MatchCard } from './components/MatchCard';
 import {
   buildMatchUrl,
@@ -46,6 +47,12 @@ export default function Home() {
   const [screening, setScreening] = useState(false);
   const [screenedScores, setScreenedScores] = useState<Record<string, any>>({});
   const [calendarError, setCalendarError] = useState('');
+  /** Réponse partielle : certaines journées n'ont pas pu être chargées. */
+  const [calendarDegraded, setCalendarDegraded] = useState(false);
+  /** Type de la dernière panne, pour proposer « réessayer » si utile. */
+  const [calendarFailure, setCalendarFailure] = useState<ClientError | null>(null);
+  /** Incrémenté pour forcer un nouvel essai de chargement du calendrier. */
+  const [calendarRetry, setCalendarRetry] = useState(0);
 
   const [hydrated, setHydrated] = useState(false);
   const [mobileSheet, setMobileSheet] = useState<SheetState>(null);
@@ -165,19 +172,20 @@ export default function Home() {
     const load = async () => {
       const combined: DayEvents = {};
       let failures = 0;
+      let lastFailure: ClientError | null = null;
       for (let i = 0; i < keys.length; i += 6) {
         const batch = keys.slice(i, i + 6);
         const results = await Promise.all(
           batch.map(async key => {
-            try {
-              const response = await fetch(`/api/fixtures?league=${encodeURIComponent(league)}&date=${key.replaceAll('-', '')}`);
-              if (!response.ok) throw new Error(`HTTP ${response.status}`);
-              const payload = await response.json();
-              return [key, (payload.events || []) as Fixture[]] as const;
-            } catch {
+            const outcome = await apiFetch<any>(
+              `/api/fixtures?league=${encodeURIComponent(league)}&date=${key.replaceAll('-', '')}`
+            );
+            if (!outcome.ok) {
               failures += 1;
+              lastFailure = outcome.error;
               return [key, [] as Fixture[]] as const;
             }
+            return [key, ((outcome.data?.events || []) as Fixture[])] as const;
           })
         );
         if (!active) return;
@@ -185,13 +193,24 @@ export default function Home() {
         setDayEvents({ ...combined });
       }
       if (!active) return;
+      setCalendarFailure(lastFailure);
       if (failures === keys.length) {
-        setCalendarError('Le calendrier est temporairement indisponible. Vérifiez votre connexion puis actualisez.');
+        setCalendarDegraded(false);
+        setCalendarError(
+          lastFailure?.retryable
+            ? 'Le calendrier est temporairement indisponible. Vérifiez votre connexion puis réessayez.'
+            : 'Aucune journée n’a pu être chargée pour cette période.'
+        );
       } else {
         if (failures === 0) {
           monthFixturesCache.set(cacheKey, { ...combined });
+          setCalendarDegraded(false);
+          setCalendarError('');
         } else {
-          setCalendarError(`Calendrier partiel : ${failures} journées n’ont pas pu être chargées.`);
+          setCalendarDegraded(true);
+          setCalendarError(
+            `Calendrier partiel : ${failures} journée(s) sur ${keys.length} n’ont pas pu être chargées.`
+          );
         }
       }
       setMonthLoading(false);
@@ -200,7 +219,7 @@ export default function Home() {
     return () => {
       active = false;
     };
-  }, [hydrated, league, month]);
+  }, [hydrated, league, month, calendarRetry]);
 
   const monthFixtures = useMemo<MonthFixture[]>(() => {
     return Object.entries(dayEvents)
@@ -483,7 +502,21 @@ export default function Home() {
             <h1>Tous les matchs du mois</h1>
             <p>
               {calendarError ? (
-                <span className="inlineError">{calendarError}</span>
+                <span className="inlineError">
+                  {calendarError}
+                  {calendarFailure?.retryable ? (
+                    <button
+                      type="button"
+                      className="inlineRetry"
+                      onClick={() => {
+                        monthFixturesCache.delete(`${league}:${month}`);
+                        setCalendarRetry(token => token + 1);
+                      }}
+                    >
+                      Réessayer
+                    </button>
+                  ) : null}
+                </span>
               ) : monthLoading ? (
                 <>
                   <i className="tinySpinner" /> Chargement des rencontres du mois…

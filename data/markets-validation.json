@@ -1,0 +1,205 @@
+{
+  "generatedAt": "2026-11-24T11:52:22.179Z",
+  "dataset": {
+    "generatedAt": "2026-11-24T11:35:40.486Z",
+    "source": "football-data.co.uk",
+    "sources": {
+      "cache": 40
+    },
+    "mirror": "https://github.com/kokosing/autobet (secours)",
+    "seasons": [
+      "0809",
+      "0910",
+      "1011",
+      "1112",
+      "1213",
+      "1314",
+      "1415",
+      "1516"
+    ],
+    "divisions": [
+      {
+        "div": "E0",
+        "league": "eng.1",
+        "label": "Premier League"
+      },
+      {
+        "div": "SP1",
+        "league": "esp.1",
+        "label": "La Liga"
+      },
+      {
+        "div": "I1",
+        "league": "ita.1",
+        "label": "Serie A"
+      },
+      {
+        "div": "D1",
+        "league": "deu.1",
+        "label": "Bundesliga"
+      },
+      {
+        "div": "F1",
+        "league": "fra.1",
+        "label": "Ligue 1"
+      }
+    ],
+    "matches": 14608,
+    "teams": 164,
+    "coverage": {
+      "bet365": 14604,
+      "pinnacle": 7295,
+      "marketAverage": 14607,
+      "overUnder25": 14607,
+      "referee": 3040,
+      "halfTime": 14607
+    },
+    "perSeason": {
+      "E0-0809": 380,
+      "E0-0910": 380,
+      "E0-1011": 380,
+      "E0-1112": 380,
+      "E0-1213": 380,
+      "E0-1314": 380,
+      "E0-1415": 380,
+      "E0-1516": 380,
+      "SP1-0809": 380,
+      "SP1-0910": 380,
+      "SP1-1011": 380,
+      "SP1-1112": 380,
+      "SP1-1213": 380,
+      "SP1-1314": 380,
+      "SP1-1415": 380,
+      "SP1-1516": 380,
+      "I1-0809": 380,
+      "I1-0910": 380,
+      "I1-1011": 380,
+      "I1-1112": 380,
+      "I1-1213": 380,
+      "I1-1314": 380,
+      "I1-1415": 380,
+      "I1-1516": 380,
+      "D1-0809": 306,
+      "D1-0910": 306,
+      "D1-1011": 306,
+      "D1-1112": 306,
+      "D1-1213": 306,
+      "D1-1314": 306,
+      "D1-1415": 306,
+      "D1-1516": 306,
+      "F1-0809": 380,
+      "F1-0910": 380,
+      "F1-1011": 380,
+      "F1-1112": 380,
+      "F1-1213": 380,
+      "F1-1314": 380,
+      "F1-1415": 380,
+      "F1-1516": 380
+    },
+    "period": "2008-08-09 → 2016-05-17",
+    "oddsNature": {
+      "type": "ouverture (pre-match)",
+      "isClosing": false,
+      "providers": {
+        "bet365": "colonnes B365H / B365D / B365A / B365>2.5 / B365<2.5",
+        "pinnacle": "colonnes PSH / PSD / PSA",
+        "average": "moyenne arithmétique des cotes dé-vigguées disponibles"
+      },
+      "note": "Ces cotes ne reflètent donc pas le prix auquel le marché a finalement équilibré le match : toute conclusion sur la marge de/bookmaker ou sur la 'valeur' doit être formulée en référence à des cotes d’ouverture, et non de clôture."
+    }
+  },
+  "markets": {
+    "one-x-two": {
+      "label": "Issue 1 / X / 2",
+      "samples": 14607,
+      "averageGap": 0.0038,
+      "logLoss": 1.0174,
+      "marketLogLoss": 0.9768,
+      "logLossLow": 1.0118,
+      "logLossHigh": 1.0227,
+      "observedRate": 0
+    },
+    "over-25": {
+      "label": "Plus de 2,5 buts",
+      "samples": 14606,
+      "averageGap": -0.011,
+      "logLoss": 0.6892,
+      "marketLogLoss": 0.679,
+      "logLossLow": 0.6866,
+      "logLossHigh": 0.6917,
+      "observedRate": 0.5005477201150212
+    }
+  },
+  "unvalidated": [
+    {
+      "id": "total-odd",
+      "label": "Total impair",
+      "reason": "ce marché n’a pas de cote de référence dans les sources publiques"
+    },
+    {
+      "id": "header-goal",
+      "label": "But de la tête",
+      "reason": "ce marché n’a pas de cote de référence dans les sources publiques"
+    },
+    {
+      "id": "first-half-score",
+      "label": "Score à la mi-temps",
+      "reason": "ce marché n’a pas de cote de référence dans les sources publiques"
+    },
+    {
+      "id": "second-half-score",
+      "label": "Score à la fin de la seconde période",
+      "reason": "ce marché n’a pas de cote de référence dans les sources publiques"
+    },
+    {
+      "id": "at-least-one-half",
+      "label": "Au moins une mi-temps avec un but",
+      "reason": "ce marché n’a pas de cote de référence dans les sources publiques"
+    },
+    {
+      "id": "first-goal-1",
+      "label": "Premier but (1re équipe)",
+      "reason": "ce marché n’a pas de cote de référence dans les sources publiques"
+    },
+    {
+      "id": "first-goal-2",
+      "label": "Deuxième but",
+      "reason": "ce marché n’a pas de cote de référence dans les sources publiques"
+    },
+    {
+      "id": "first-goal-3",
+      "label": "Premier but (3e équipe)",
+      "reason": "ce marché n’a pas de cote de référence dans les sources publiques"
+    },
+    {
+      "id": "last-goal",
+      "label": "Dernier but",
+      "reason": "ce marché n’a pas de cote de référence dans les sources publiques"
+    },
+    {
+      "id": "half-time-full-time",
+      "label": "Mi-temps / fin de match",
+      "reason": "ce marché n’a pas de cote de référence dans les sources publiques"
+    },
+    {
+      "id": "clean-sheet-home",
+      "label": "Clean sheet domicile",
+      "reason": "ce marché n’a pas de cote de référence dans les sources publiques"
+    },
+    {
+      "id": "clean-sheet-away",
+      "label": "Clean sheet extérieur",
+      "reason": "ce marché n’a pas de cote de référence dans les sources publiques"
+    },
+    {
+      "id": "btts",
+      "label": "Les deux équipes marquent",
+      "reason": "ce marché n’a pas de cote de référence dans les sources publiques"
+    },
+    {
+      "id": "asian-handicap",
+      "label": "Handicap asiatique",
+      "reason": "ce marché n’a pas de cote de référence dans les sources publiques"
+    }
+  ]
+}

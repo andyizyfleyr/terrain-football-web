@@ -13,7 +13,12 @@
     "check:model": "node --experimental-strip-types --import ./scripts/register-ts-hook.mjs scripts/model-check.ts",
     "check:backtest": "node --experimental-strip-types --import ./scripts/register-ts-hook.mjs scripts/backtest-check.ts",
     "smoke": "node scripts/smoke-production.mjs",
-    "check": "npm run check:devig && npm run check:market && npm run check:market:integration && npm run check:market:fetch && npm run check:model && npm run check:backtest"
+    "check": "npm run check:devig && npm run check:market && npm run check:market:integration && npm run check:market:fetch && npm run check:model && npm run check:backtest && npm run check:step3",
+    "import:football-data": "node --experimental-strip-types --import ./scripts/register-ts-hook.mjs scripts/import-football-data.ts",
+    "check:backtest:strict": "node --experimental-strip-types --import ./scripts/register-ts-hook.mjs scripts/backtest-strict.ts",
+    "check:ablation": "node --experimental-strip-types --import ./scripts/register-ts-hook.mjs scripts/module-ablation.ts",
+    "check:markets": "node --experimental-strip-types --import ./scripts/register-ts-hook.mjs scripts/validate-markets.ts",
+    "check:step3": "node --experimental-strip-types --import ./scripts/register-ts-hook.mjs scripts/step3-check.ts"
   },
   "dependencies": {
     "next": "16.4.6",

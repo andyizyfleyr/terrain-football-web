@@ -50,6 +50,10 @@ import {
   valueAssessment,
   type CalibrationParams,
 } from './calibration';
+import { normaliseOutcomeSet, safeProbability, safeProbabilityOr } from './probabilities';
+import { detectMatchTraps, type MatchTrap } from './matchTraps';
+import { buildDisclosure, type Disclosure } from './disclosure';
+import type { ScaleValidation } from './calibration';
 import { DEFAULT_CALIBRATION } from './calibrationParams';
 
 export { devigPower, devigShin, devigThreeWayDecimal, devigTwoWayDecimal, normaliseProbs } from './devig';
@@ -256,6 +260,25 @@ export type AnalystInput = {
   away: AnalystTeamInput;
   /** Surcharge de la calibration (utilisée par le backtest). */
   calibration?: Partial<CalibrationParams>;
+  /**
+   * Nombre d'itérations de la simulation de Monte-Carlo (10 000 par
+   * défaut). Les backtests sur plusieurs milliers de rencontres réduisent
+   * ce nombre : les probabilités 1X2 du moteur ne dépendent PAS de la
+   * simulation (elles viennent du modèle de Poisson/Dixon-Coles), seules
+   * les statistiques de simulation et les pronostics dérivés en sont
+   * sensibles.
+   */
+  simulationRuns?: number;
+  /**
+   * Modules à neutraliser pour une ablation (mesure de la contribution
+   * de chaque module). Identifiants : « 01 » (ρ / covariance),
+   * « 02 » (référence championnat et force des équipes), « 03 »
+   * (finition, gardiens, qualité de tir), « 04 » (absences, onze),
+   * « 05 » (confrontation tactique), « 06 » (calibration marché),
+   * « 07 » (calendrier, enjeux, séries, surface, arbitre, météo),
+   * « 08 » (simulation Monte-Carlo).
+   */
+  ablate?: string[];
   /** Qualité de tir historique des deux équipes (shotmap). */
   shotQuality?: {
     home: ShotQualityProfile | null;
@@ -289,6 +312,8 @@ export type AnalystReport = {
   homeName: string;
   awayName: string;
   kickoffIso: string;
+  /** Avertissements « match piège » (derby, rotation, données rares…). */
+  traps: MatchTrap[];
   confidence: {
     score: number;
     label: string;
@@ -301,6 +326,8 @@ export type AnalystReport = {
     interval: { low: number; high: number };
     note: string;
   };
+  /** Disclosure transparente : ce que le modèle vaut réellement. */
+  disclosure: Disclosure;
   calibration: {
     modelWeight: number;
     marketWeight: number;
@@ -326,6 +353,8 @@ export type AnalystReport = {
     accuracy: number;
     valueRoi: number | null;
     valueBets: number;
+    /** Validation à grande échelle (football-data.co.uk), si disponible. */
+    scaleValidation: ScaleValidation | null;
     limitations: string[];
   };
   lambdas: { home: number; away: number; total: number; startHome: number; startAway: number };
@@ -1000,6 +1029,32 @@ function lineupStrength(lineup: AnalystLineup | null | undefined, squad: Analyst
 
 type TacticalProfile = AnalystReport['tactics']['home'];
 
+/**
+ * Vrai si au moins une statistique de style est disponible.
+ *
+ * Fonction exportée pour être testée isolément : c'est la garde qui
+ * empêche l'absence de données d'être interprétée comme un style de
+ * jeu « peu offensif » (tempo 0,88).
+ */
+export function hasTacticalData(stats: AnalystTeamInput['stats']): boolean {
+  const keys = [
+    'possession_percentage_team',
+    'poss_won_att_3rd_team',
+    'accurate_long_balls_team',
+    'accurate_pass_team',
+    'accurate_cross_team',
+    'effective_clearance_team',
+    'interception_team',
+    'total_tackle_team',
+    'phys_tdc_team',
+    'big_chance_team',
+  ];
+  return keys.some(key => {
+    const entry = stats?.[key];
+    return Boolean(entry) && Number.isFinite(entry?.value);
+  });
+}
+
 function buildTacticalProfile(team: AnalystTeamInput): TacticalProfile {
   const possession = statValue(team, 'possession_percentage_team');
   const press = statValue(team, 'poss_won_att_3rd_team');
@@ -1024,7 +1079,19 @@ function buildTacticalProfile(team: AnalystTeamInput): TacticalProfile {
   let tempo = 1;
   const ranked = scores.pressing + scores.block + scores.direct + scores.possession + scores.transition;
 
-  if (ranked < 0.9) {
+  // AUCUNE donnée tactique disponible : le profil reste NEUTRE.
+  // Traiter l'absence de données comme un style « peu offensif »
+  // (tempo 0,88) faisait chuter les buts attendus de 12 % sur le jeu
+  // football-data (λ moyen 2,43 au lieu de 2,76, soit exactement la
+  // moyenne réelle du championnat) et déscalibrait le marché
+  // « plus de 2,5 buts » de 9 points. Une donnée absente n'est pas
+  // une preuve : elle doit laisser le module sans effet.
+  const dataPresent = hasTacticalData(team.stats);
+
+  if (!dataPresent) {
+    profile = 'Données tactiques indisponibles — profil neutre';
+    tempo = 1;
+  } else if (ranked < 0.9) {
     profile = 'Profil discret — peu de volume offensif';
     tempo = 0.88;
   } else if (scores.pressing >= 0.6 && scores.possession >= 0.45) {
@@ -1708,13 +1775,12 @@ export function shrunkRatio(
 export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   const kickoffIso = input.kickoffIso || new Date().toISOString();
   const { home, away, league } = input;
+  // Ablation : un module listé ici n'a AUCUN effet sur le résultat.
+  const ablated = new Set(input.ablate || []);
+  const isOff = (module: string) => ablated.has(module);
 
   /* --- Module 02 : base de référence du championnat ------------------- */
   const xgRows = league.xgRows || [];
-  // Prior empirique : 4 « équipes fictives » valent la référence de
-  // championnat, ce qui stabilise fortement le début de saison.
-  const leagueAvgXg = shrunkMean(xgRows.map(r => (r.xg || 0) / Math.max(1, r.played)), 1.35);
-  const leagueAvgXga = shrunkMean(xgRows.map(r => (r.xgConceded || 0) / Math.max(1, r.played)), leagueAvgXg);
   const leagueAvgGoals = shrunkMean(
     (league.rowsAll || []).map(r => goalsFor(r) / Math.max(1, r.played)),
     1.45
@@ -1723,6 +1789,21 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
     (league.rowsAll || []).map(r => goalsAgainst(r) / Math.max(1, r.played)),
     leagueAvgGoals
   );
+  // Le championnat dispose-t-il de données xG ? Si la source n'en fournit
+  // pas (ou si toutes les valeurs sont nulles), la référence de buts
+  // attendus doit être la moyenne de BUTS : sinon le rétrécissement vers
+  // 1,35 sur une série de zéros fait s'effondrer les buts attendus.
+  // Mesuré sur le jeu football-data (aucun xG) : λ moyen de 0,53 au
+  // lieu de 1,63, soit 55 % de nuls annoncés contre 24 % observés.
+  const hasXgData = xgRows.some(row => (row.xg || 0) > 0 && (row.played || 0) > 0);
+  // Prior empirique : 4 « équipes fictives » valent la référence de
+  // championnat, ce qui stabilise fortement le début de saison.
+  const leagueAvgXg = hasXgData
+    ? shrunkMean(xgRows.map(r => (r.xg || 0) / Math.max(1, r.played)), 1.35)
+    : leagueAvgGoals;
+  const leagueAvgXga = hasXgData
+    ? shrunkMean(xgRows.map(r => (r.xgConceded || 0) / Math.max(1, r.played)), leagueAvgXg)
+    : leagueAvgGoalsAgainst;
   const leagueHomeGoals = shrunkMean(
     (league.rowsHome || []).map(r => goalsFor(r) / Math.max(1, r.played)),
     leagueAvgGoals * 1.14
@@ -1792,7 +1873,14 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   lambdaHome = lambdaHome * anchor + input.baseLambdas.home * (1 - anchor);
   lambdaAway = lambdaAway * anchor + input.baseLambdas.away * (1 - anchor);
 
+  // Module 02 neutralisé : on ne garde que la référence amont.
+  if (isOff('02')) {
+    lambdaHome = input.baseLambdas.home;
+    lambdaAway = input.baseLambdas.away;
+  }
+
   /* --- Module 03 : npxG, finition, gardiens --------------------------- */
+  const lambdaBeforeModule03 = { home: lambdaHome, away: lambdaAway };
   const homeGoalsPerMatch = goalsFor(home.tableAll) / Math.max(1, home.tableAll?.played || 1);
   const awayGoalsPerMatch = goalsFor(away.tableAll) / Math.max(1, away.tableAll?.played || 1);
   const finishingHome = buildFinishingProfile(home, home.tableAll?.played || 1, homeGoalsPerMatch || 1.2);
@@ -1836,7 +1924,15 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   lambdaHome *= shotFactorHome.factor;
   lambdaAway *= shotFactorAway.factor;
 
+  // Module 03 neutralisé : finition, gardiens et qualité de tir n'ont
+  // plus d'effet sur les buts attendus.
+  if (isOff('03')) {
+    lambdaHome = lambdaBeforeModule03.home;
+    lambdaAway = lambdaBeforeModule03.away;
+  }
+
   /* --- Module 04 : absences (contributions mesurées) & onze ---------- */
+  const lambdaBeforeModule04 = { home: lambdaHome, away: lambdaAway };
   // L'impact d'un absent est calculé sur sa CONTRIBUTION réelle au jeu
   // (xG, xA, buts, passes, minutes) et non sur sa seule valeur marchande.
   const contributionsHome = buildPlayerContributions(
@@ -1890,7 +1986,15 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
     lambdaAway *= adj;
   }
 
+  // Module 04 neutralisé : ni les absences ni la force du onze ne
+  // modifient les buts attendus.
+  if (isOff('04')) {
+    lambdaHome = lambdaBeforeModule04.home;
+    lambdaAway = lambdaBeforeModule04.away;
+  }
+
   /* --- Module 05 : confrontation tactique ----------------------------- */
+  const lambdaBeforeModule05 = { home: lambdaHome, away: lambdaAway };
   const tacticsHome = buildTacticalProfile(home);
   const tacticsAway = buildTacticalProfile(away);
   const matchup = tacticalMatchup(tacticsHome, tacticsAway);
@@ -1900,7 +2004,14 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   lambdaHome *= tempoRatio * (1 + matchup.homeAdj);
   lambdaAway *= tempoRatio * (1 + matchup.awayAdj);
 
+  // Module 05 neutralisé : la confrontation tactique n'agit plus.
+  if (isOff('05')) {
+    lambdaHome = lambdaBeforeModule05.home;
+    lambdaAway = lambdaBeforeModule05.away;
+  }
+
   /* --- Module 07 : calendrier, enjeux, séries, surface, arbitre, météo - */
+  const lambdaBeforeModule07 = { home: lambdaHome, away: lambdaAway };
   const calendarHome = analyseCalendar(home, kickoffIso, home.recentMatches || []);
   const calendarAway = analyseCalendar(away, kickoffIso, away.recentMatches || []);
   const fatigueHome = clamp(1 - calendarHome.fatigue * 0.16, 0.9, 1.06);
@@ -1981,6 +2092,13 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   lambdaHome = clamp(lambdaHome * refereeEffect * weatherEffect * pitchEffect, 0.22, 3.9);
   lambdaAway = clamp(lambdaAway * refereeEffect * weatherEffect * pitchEffect, 0.2, 3.9);
 
+  // Module 07 neutralisé : ni fatigue, ni enjeux, ni séries, ni surface,
+  // ni arbitre, ni météo ne modifient les buts attendus.
+  if (isOff('07')) {
+    lambdaHome = lambdaBeforeModule07.home;
+    lambdaAway = lambdaBeforeModule07.away;
+  }
+
   /* --- Module 01 : estimation de ρ ------------------------------------ */
   const rhoSamplePool = [
     ...(home.recentMatches || []).slice(0, 20),
@@ -1990,7 +2108,7 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   // Stabilisation : l'estimation est pondérée avec la valeur de référence du championnat
   const rhoBlend = rhoFit.samples >= 40 ? 0.75 : rhoFit.samples >= 16 ? 0.5 : 0;
   const rhoBase = rhoBlend > 0 ? rhoFit.rho * rhoBlend + RHO_PRIOR * (1 - rhoBlend) : RHO_PRIOR;
-  const rho = clamp(rhoBase + matchup.rhoAdjustment, -0.22, 0.22);
+  const rho = isOff('01') ? 0 : clamp(rhoBase + matchup.rhoAdjustment, -0.22, 0.22);
 
   /* --- Module 01bis : covariance entre les buts des deux équipes ------- */
   // λ₃ capte les situations partagées (ouverture, erreurs profitables à
@@ -2000,7 +2118,7 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
     ...rhoSamplePool.map(m => ({ homeGoals: m.homeScore, awayGoals: m.awayScore })),
   ];
   const covarianceFit = estimateCovariance(covarianceSamples, lambdaHome, lambdaAway);
-  const covariance = covarianceFit.samples >= 20 ? covarianceFit.covariance : 0;
+  const covariance = isOff('01') ? 0 : covarianceFit.samples >= 20 ? covarianceFit.covariance : 0;
 
   /* --- Module 01ter : répartition des buts par période ---------------- */
   const periodFit = estimateFirstHalfShare(input.halfTimeSamples || []);
@@ -2074,15 +2192,25 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   let method = 'aucun marché';
   let overround = 0;
 
-  if (market) {
+  if (market && !isOff('06')) {
+    // Module 06 neutralisé : aucune calibration de marché, les
+    // probabilités publiées restent celles du modèle brut.
     method = market.method;
     overround = market.overround;
+    // Contrôle de sortie : les probabilités dé-vigguées doivent être
+    // valides avant d'être comparées au modèle (sinon les écarts, et
+    // donc la détection de valeur, seraient calculés sur du bruit).
     devigged = {
-      home: market.probs.home,
-      draw: market.probs.draw,
-      away: market.probs.away,
-      over25: market.over25,
-      btts: market.btts,
+      ...normaliseOutcomeSet(
+        {
+          home: market.probs.home,
+          draw: market.probs.draw,
+          away: market.probs.away,
+        },
+        { home: 1 / 3, draw: 1 / 3, away: 1 / 3 }
+      ),
+      over25: safeProbability(market.over25),
+      btts: safeProbability(market.btts),
     };
     // Température puis mélange : la température corrige le biais global du
     // modèle (trop prudent ou trop affirmatif), le mélange arbitre avec le
@@ -2093,17 +2221,26 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
       calibration
     ).probs;
     calibrated = {
-      home: modelWeight * tempered.home + (1 - modelWeight) * market.probs.home,
-      draw: modelWeight * tempered.draw + (1 - modelWeight) * market.probs.draw,
-      away: modelWeight * tempered.away + (1 - modelWeight) * market.probs.away,
-      over25:
+      ...normaliseOutcomeSet(
+        {
+          home: modelWeight * tempered.home + (1 - modelWeight) * market.probs.home,
+          draw: modelWeight * tempered.draw + (1 - modelWeight) * market.probs.draw,
+          away: modelWeight * tempered.away + (1 - modelWeight) * market.probs.away,
+        },
+        { home: 1 / 3, draw: 1 / 3, away: 1 / 3 }
+      ),
+      over25: safeProbabilityOr(
         market.over25 !== null
           ? modelWeight * pureModel.over25 + (1 - modelWeight) * market.over25
           : pureModel.over25,
-      btts:
+        pureModel.over25
+      ),
+      btts: safeProbabilityOr(
         market.btts !== null
           ? modelWeight * pureModel.btts + (1 - modelWeight) * market.btts
           : pureModel.btts,
+        pureModel.btts
+      ),
     };
     edges = {
       home: calibrated.home - market.probs.home,
@@ -2123,6 +2260,13 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
     const assessment = valueAssessment(best.edge, calibration);
     if (assessment.isValue) {
       value = { pick: best.key, label: `Valeur détectée : ${best.label}`, edge: round(best.edge, 4) };
+    } else if (calibration.valueThresholdDemonstrated === false) {
+      value = {
+        pick: '',
+        label:
+          'Aucune valeur annoncée : aucun seuil de valeur n’a été démontré sur l’historique de référence.',
+        edge: 0,
+      };
     } else if (best.edge <= -calibration.valueThreshold) {
       value = { pick: best.key, label: `Le marché est plus optimiste que le modèle (${best.label})`, edge: round(best.edge, 4) };
     }
@@ -2131,7 +2275,7 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   /* --- Module 08 : Monte-Carlo ---------------------------------------- */
   const seed = hashString(`${input.matchId || ''}|${kickoffIso}|${home.teamId}-${away.teamId}`);
   const mc = runMonteCarlo({
-    runs: 10_000,
+    runs: input.simulationRuns ?? 10_000,
     seed,
     lambdaHome,
     lambdaAway,
@@ -2141,13 +2285,18 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   const sim = {
     runs: mc.runs,
     seed: mc.seed,
-    home: mc.home,
-    draw: mc.draw,
-    away: mc.away,
-    over15: mc.over15,
-    over25: mc.over25,
-    over35: mc.over35,
-    btts: mc.btts,
+    // Contrôle de sortie : la simulation doit produire un ensemble
+    // exhaustif valide (valeurs finies, dans [0,1], sommant à 1). Sinon
+    // on affiche une répartition uniforme explicite plutôt que des
+    // nombres faux.
+    ...normaliseOutcomeSet(
+      { home: mc.home, draw: mc.draw, away: mc.away },
+      { home: 1 / 3, draw: 1 / 3, away: 1 / 3 }
+    ),
+    over15: safeProbability(mc.over15) ?? 0,
+    over25: safeProbability(mc.over25) ?? 0,
+    over35: safeProbability(mc.over35) ?? 0,
+    btts: safeProbability(mc.btts) ?? 0,
     expectedGoals: {
       home: round(mc.expectedGoals.home, 2),
       away: round(mc.expectedGoals.away, 2),
@@ -2270,7 +2419,19 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   ].sort((a, b) => b.p - a.p);
   const separation = clamp((simRanked[0].p - simRanked[1].p) / 0.3, 0, 1);
   const maxEdge = market ? Math.max(Math.abs(edges.home), Math.abs(edges.draw), Math.abs(edges.away)) : 0;
-  const agreement = clamp(1 - maxEdge / 0.15, 0, 1);
+  // « Accord du modèle avec le marché » : on mesure l'écart entre le
+  // MODÈLE (probabilités pures) et le marché, pas l'écart du mélange
+  // calibré. Sinon la feature devient constante quand le poids du modèle
+  // est nul (le mélange redevient le marché) et l'accord cesse d'apporter
+  // aucune information à la confiance.
+  const modelMaxEdge = market
+    ? Math.max(
+        Math.abs(pureModel.home - devigged.home),
+        Math.abs(pureModel.draw - devigged.draw),
+        Math.abs(pureModel.away - devigged.away)
+      )
+    : 0;
+  const agreement = clamp(1 - modelMaxEdge / 0.15, 0, 1);
   const confidenceScore = Math.round(100 * (0.5 * separation + 0.32 * completeness + 0.18 * agreement));
 
   // La confiance affichée n'est plus un score arbitraire : c'est la
@@ -2290,6 +2451,19 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   );
   const confidenceInterval = probabilityInterval(calibration, calibratedConfidenceValue.probability);
   const confidenceLabel = calibratedConfidenceValue.label;
+
+  /* --- Avertissements « match piège » --------------------------------- */
+  const traps = detectMatchTraps({
+    league: league.name ?? null,
+    homeName: home.name,
+    awayName: away.name,
+    homeRecentDates: (home.recentMatches || []).map(match => String(match.utcTime || '').slice(0, 10)),
+    awayRecentDates: (away.recentMatches || []).map(match => String(match.utcTime || '').slice(0, 10)),
+    homePlayed: home.tableAll?.played ?? null,
+    awayPlayed: away.tableAll?.played ?? null,
+    kickoffIso,
+    coachChanged: null,
+  });
 
   /* --- Synthèse -------------------------------------------------------- */
   const synthesis = buildSynthesis({
@@ -2432,12 +2606,29 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
     },
   ];
 
+  // --- Disclosure transparente -----------------------------------------
+  // Le verdict est calculé à partir des MESURES publiées, pas d'une
+  // opinion : c'est ce qui permet à l'interface d'afficher honnêtement
+  // « le modèle ne fait pas mieux que le marché » quand c'est le cas.
+  const disclosure = buildDisclosure({
+    calibratedLogLoss: calibration.metrics.calibratedLogLoss,
+    calibratedLogLossInSample: calibration.metrics.calibratedLogLossInSample,
+    marketLogLoss: calibration.metrics.marketLogLoss,
+    modelLogLoss: calibration.metrics.modelLogLoss,
+    sampleSize: calibration.metrics.sampleSize,
+    valueDemonstrated: calibration.valueThresholdDemonstrated !== false,
+    valueBets: calibration.metrics.valueBets,
+    valueRoi: calibration.metrics.valueRoi,
+  });
+
   return {
     version: '3.0',
     generatedAt: new Date().toISOString(),
     homeName: home.name,
     awayName: away.name,
     kickoffIso,
+    traps,
+    disclosure,
     confidence: {
       score: confidenceScore,
       label: confidenceLabel,
@@ -2476,6 +2667,7 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
       accuracy: calibration.metrics.accuracy,
       valueRoi: calibration.metrics.valueRoi,
       valueBets: calibration.metrics.valueBets,
+      scaleValidation: calibration.metrics.scaleValidation ?? null,
       limitations: calibration.limitations || [],
     },
     lambdas: {

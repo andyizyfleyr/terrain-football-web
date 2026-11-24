@@ -47,6 +47,26 @@ SLOW_TIMEOUT = float(os.environ.get("ESPN_SLOW_TIMEOUT", "30"))
 MAX_CONCURRENT = int(os.environ.get("ESPN_MAX_CONCURRENT", "4"))
 CACHE_TTL = float(os.environ.get("ESPN_CACHE_TTL", "600"))
 DAY_CACHE_TTL = float(os.environ.get("ESPN_DAY_CACHE_TTL", "300"))
+# Les caches sont bornes en DUREE et en NOMBRE d'entrees : sans purge, ils
+# grossiraient indefiniment sur une instance qui vit longtemps (chaque
+# equipe, chaque journee, chaque saison est une cle).
+CACHE_MAX_ENTRIES = int(os.environ.get("ESPN_CACHE_MAX_ENTRIES", "500"))
+
+
+def prune_cache(cache: Dict[str, Dict[str, Any]], ttl: float) -> None:
+    """Supprime les entrees expirees et borne la taille du cache.
+
+    L'ordre d'insertion de la dict est respecte : les plus anciennes
+    entrées sont evacuées en premier.
+    """
+    now = time.time()
+    for key in [k for k, v in cache.items() if now - v["at"] >= ttl]:
+        cache.pop(key, None)
+    while len(cache) > CACHE_MAX_ENTRIES:
+        oldest = next(iter(cache), None)
+        if oldest is None:
+            break
+        cache.pop(oldest, None)
 
 # Un semaphore par boucle d'evenements (une instance Vercel peut en
 # reutiliser plusieurs dans sa vie).
@@ -354,6 +374,7 @@ async def fetch_day_fixtures(
             }
         )
     result = {"events": events, "calendar": season_calendar(payload)}
+    prune_cache(DAY_CACHE, DAY_CACHE_TTL)
     DAY_CACHE[key] = {"at": time.time(), "payload": result}
     return result
 
@@ -425,6 +446,7 @@ async def fetch_league_season(
             seen.add(parsed["id"])
             events.append(parsed)
     events.sort(key=lambda m: m.get("date") or "")
+    prune_cache(SEASON_CACHE, SEASON_CACHE_TTL)
     SEASON_CACHE[key] = {"at": now, "events": events}
     return events
 
@@ -469,6 +491,7 @@ async def fetch_team_schedule(
         else:
             payload = await fetch_json(client, url, timeout=SLOW_TIMEOUT)
             if payload is not None:
+                prune_cache(SCHEDULE_CACHE, CACHE_TTL)
                 SCHEDULE_CACHE[cache_key] = {"at": time.time(), "payload": payload}
         for event in (payload or {}).get("events") or []:
             parsed = _parse_event(event)

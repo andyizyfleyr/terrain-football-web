@@ -1,0 +1,165 @@
+id,div,name,normalised
+1,E0,Arsenal,arsenal
+2,E0,West Brom,west brom
+3,E0,Bolton,bolton
+4,E0,Stoke,stoke
+5,E0,Everton,everton
+6,E0,Blackburn,blackburn
+7,E0,Hull,hull
+8,E0,Fulham,fulham
+9,E0,Middlesbrough,middlesbrough
+10,E0,Tottenham,tottenham
+11,E0,Sunderland,sunderland
+12,E0,Liverpool,liverpool
+13,E0,West Ham,west ham
+14,E0,Wigan,wigan
+15,E0,Aston Villa,aston villa
+16,E0,Man City,man city
+17,E0,Chelsea,chelsea
+18,E0,Portsmouth,portsmouth
+19,E0,Man United,man united
+20,E0,Newcastle,newcastle
+21,E0,Burnley,burnley
+22,E0,Wolves,wolves
+23,E0,Birmingham,birmingham
+24,E0,Blackpool,blackpool
+25,E0,QPR,qpr
+26,E0,Norwich,norwich
+27,E0,Swansea,swansea
+28,E0,Reading,reading
+29,E0,Southampton,southampton
+30,E0,Cardiff,cardiff
+31,E0,Crystal Palace,crystal palace
+32,E0,Leicester,leicester
+33,E0,Bournemouth,bournemouth
+34,E0,Watford,watford
+35,SP1,Espanol,espanol
+36,SP1,Valladolid,valladolid
+37,SP1,Valencia,valencia
+38,SP1,Mallorca,mallorca
+39,SP1,Ath Bilbao,ath bilbao
+40,SP1,Almeria,almeria
+41,SP1,Ath Madrid,ath madrid
+42,SP1,Malaga,malaga
+43,SP1,Betis,betis
+44,SP1,Recreativo,recreativo
+45,SP1,La Coruna,la coruna
+46,SP1,Real Madrid,real madrid
+47,SP1,Numancia,numancia
+48,SP1,Barcelona,barcelona
+49,SP1,Osasuna,osasuna
+50,SP1,Villarreal,villarreal
+51,SP1,Santander,santander
+52,SP1,Sevilla,sevilla
+53,SP1,Sp Gijon,sp gijon
+54,SP1,Getafe,getafe
+55,SP1,Zaragoza,zaragoza
+56,SP1,Tenerife,tenerife
+57,SP1,Xerez,xerez
+58,SP1,Hercules,hercules
+59,SP1,Levante,levante
+60,SP1,Sociedad,sociedad
+61,SP1,Granada,granada
+62,SP1,Vallecano,vallecano
+63,SP1,Celta,celta
+64,SP1,Elche,elche
+65,SP1,Eibar,eibar
+66,SP1,Cordoba,cordoba
+67,SP1,Las Palmas,las palmas
+68,I1,Sampdoria,sampdoria
+69,I1,Inter,inter
+70,I1,Udinese,udinese
+71,I1,Palermo,palermo
+72,I1,Atalanta,atalanta
+73,I1,Siena,siena
+74,I1,Cagliari,cagliari
+75,I1,Lazio,lazio
+76,I1,Catania,catania
+77,I1,Genoa,genoa
+78,I1,Chievo,chievo
+79,I1,Reggina,reggina
+80,I1,Fiorentina,fiorentina
+81,I1,Juventus,juventus
+82,I1,Milan,milan
+83,I1,Bologna,bologna
+84,I1,Roma,roma
+85,I1,Napoli,napoli
+86,I1,Torino,torino
+87,I1,Lecce,lecce
+88,I1,Bari,bari
+89,I1,Livorno,livorno
+90,I1,Parma,parma
+91,I1,Cesena,cesena
+92,I1,Brescia,brescia
+93,I1,Novara,novara
+94,I1,Pescara,pescara
+95,I1,Verona,verona
+96,I1,Sassuolo,sassuolo
+97,I1,Empoli,empoli
+98,I1,Frosinone,frosinone
+99,I1,Carpi,carpi
+100,D1,Bayern Munich,bayern munich
+101,D1,Hamburg,hamburg
+102,D1,Bielefeld,bielefeld
+103,D1,Werder Bremen,werder bremen
+104,D1,Cottbus,cottbus
+105,D1,Hoffenheim,hoffenheim
+106,D1,Karlsruhe,karlsruhe
+107,D1,Bochum,bochum
+108,D1,Leverkusen,leverkusen
+109,D1,Dortmund,dortmund
+110,D1,Schalke 04,schalke 04
+111,D1,Hannover,hannover
+112,D1,Wolfsburg,wolfsburg
+113,D1,FC Koln,fc koln
+114,D1,Ein Frankfurt,ein frankfurt
+115,D1,Hertha,hertha
+116,D1,M'gladbach,mgladbach
+117,D1,Stuttgart,stuttgart
+118,D1,Mainz,mainz
+119,D1,Nurnberg,nurnberg
+120,D1,Freiburg,freiburg
+121,D1,Kaiserslautern,kaiserslautern
+122,D1,St Pauli,st pauli
+123,D1,Augsburg,augsburg
+124,D1,Fortuna Dusseldorf,fortuna dusseldorf
+125,D1,Greuther Furth,greuther furth
+126,D1,Braunschweig,braunschweig
+127,D1,Paderborn,paderborn
+128,D1,Darmstadt,darmstadt
+129,D1,Ingolstadt,ingolstadt
+130,F1,Auxerre,auxerre
+131,F1,Nantes,nantes
+132,F1,Bordeaux,bordeaux
+133,F1,Caen,caen
+134,F1,Le Havre,le havre
+135,F1,Nice,nice
+136,F1,Le Mans,le mans
+137,F1,Lorient,lorient
+138,F1,Monaco,monaco
+139,F1,Paris SG,paris sg
+140,F1,Nancy,nancy
+141,F1,Lille,lille
+142,F1,Rennes,rennes
+143,F1,Marseille,marseille
+144,F1,Sochaux,sochaux
+145,F1,Grenoble,grenoble
+146,F1,Valenciennes,valenciennes
+147,F1,St Etienne,st etienne
+148,F1,Lyon,lyon
+149,F1,Toulouse,toulouse
+150,F1,Montpellier,montpellier
+151,F1,Boulogne,boulogne
+152,F1,Lens,lens
+153,F1,Arles,arles
+154,F1,Brest,brest
+155,F1,Ajaccio,ajaccio
+156,F1,Evian Thonon Gaillard,evian thonon gaillard
+157,F1,Dijon,dijon
+158,F1,Bastia,bastia
+159,F1,Troyes,troyes
+160,F1,Reims,reims
+161,F1,Guingamp,guingamp
+162,F1,Metz,metz
+163,F1,Angers,angers
+164,F1,Ajaccio GFCO,ajaccio gfco

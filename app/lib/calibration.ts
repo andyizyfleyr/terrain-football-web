@@ -44,6 +44,14 @@ export type CalibrationMetrics = {
   calibratedLogLossInSample: number;
   /** Nombre de blocs de validation croisée utilisés. */
   crossValidationFolds: number;
+  /**
+   * Log-loss en marche avant STRICTE : chaque bloc est évalué avec une
+   * calibration ajustée uniquement sur les blocs précédents. Aucun match
+   * n'est évalué avec une calibration qui a vu son avenir.
+   */
+  walkForwardLogLoss: number;
+  /** Rencontrées effectivement couvertes par la marche avant stricte. */
+  walkForwardEvaluated: number;
   /** Log-loss d'une référence naïve (moyennes de la league). */
   naiveLogLoss: number;
   brier: number;
@@ -52,12 +60,55 @@ export type CalibrationMetrics = {
   valueRoi: number | null;
   valueBets: number;
   valueThreshold: number;
+  /**
+   * Validation à GRANDE ÉCHELLE sur un jeu de données tiers
+   * (football-data.co.uk : 5 championnat, 8 saisons, 14 608 rencontres,
+   * cotes Bet365 et Pinnacle). Elle est publiée à part car elle rejoue
+   * le moteur SANS les données xG ni les statistiques de joueurs :
+   * c'est une borne INFÉRIEURE de la performance du moteur de
+   * production, mais elle porte sur un échantillon 60 fois plus grand.
+   */
+  scaleValidation?: ScaleValidation;
+};
+
+/** Résultats de la validation à grande échelle (football-data.co.uk). */
+export type ScaleValidation = {
+  /** Nombre de rencontres rejouées. */
+  sampleSize: number;
+  /** Championnats couverts. */
+  leagues: string;
+  /** Période couverte. */
+  period: string;
+  /** Log-loss du modèle pur (non calibré). */
+  modelLogLoss: number;
+  /** Log-loss du modèle calibré, walk-forward strict. */
+  calibratedLogLoss: number;
+  /** Log-loss du marché de référence (moyenne des bookmakers, dé-vigguée). */
+  marketLogLoss: number;
+  /** Log-loss de Pinnacle (échantillon partiel). */
+  pinnacleLogLoss: number;
+  /** Exactitude du modèle calibré. */
+  accuracy: number;
+  /** Score de Brier du modèle calibré. */
+  brier: number;
+  /** Nombre de paris à « valeur » retenus. */
+  valueBets: number;
+  /** ROI mesuré sur ces paris (null si aucun pari). */
+  valueRoi: number | null;
+  /** Le seuil de valeur est-il démontré à cette échelle ? */
+  valueDemonstrated: boolean;
 };
 
 export type ConfidenceBin = {
   min: number;
   max: number;
-  probability: number;
+  /**
+   * Probabilité mesurée sur l'historique pour cette tranche de confiance.
+   * null quand la tranche ne contient AUCUN échantillon : dans ce cas,
+   * aucune probabilité ne peut être mesurée et l'inventer (prendre le
+   * milieu de la tranche) ferait passer une estimation pour une mesure.
+   */
+  probability: number | null;
   samples: number;
 };
 
@@ -69,6 +120,13 @@ export type CalibrationParams = {
   sharpness: number;
   /** Écart minimal (points de probabilité) pour parler de « valeur ». */
   valueThreshold: number;
+  /**
+   * true si l'ajustement a démontré un seuil de valeur rentable sur
+   * l'historique. Quand c'est false, aucun seuil n'a été démontré : la
+   * détection de valeur doit rester DORMANTE plutôt que de déclarer
+   * « valeur » tous les paris dont l'écart est strictement positif.
+   */
+  valueThresholdDemonstrated?: boolean;
   /** Concentration Beta effective pour les intervalles de crédibilité. */
   effectiveSampleSize: number;
   /**
@@ -86,6 +144,14 @@ export type CalibrationParams = {
 };
 
 export type OutcomeProbs = { home: number; draw: number; away: number };
+
+/**
+ * Écart minimal considéré comme significatif. En dessous, l'écart n'est
+ * que du bruit de calcul en virgule flottante : sans cette garde, un
+ * mélange dont le poids de modèle est nul produit des écarts de l'ordre
+ * de 1e-16, qui suffisent à faire passer une rencontre pour un « pari ».
+ */
+export const MIN_MEANINGFUL_EDGE = 1e-6;
 
 /** Mélange convexe modèle / marché. */
 export function blendProbabilities(
@@ -170,7 +236,16 @@ export function valueAssessment(
   params: CalibrationParams
 ): { isValue: boolean; threshold: number; note: string } {
   const threshold = params.valueThreshold;
-  if (!Number.isFinite(edge) || edge <= 0) {
+  if (params.valueThresholdDemonstrated === false) {
+    return {
+      isValue: false,
+      threshold,
+      note:
+        'Aucun seuil de valeur n’a été démontré sur l’historique de référence : ' +
+        'la détection de valeur reste inactive tant que le seuil n’est pas établi.',
+    };
+  }
+  if (!Number.isFinite(edge) || edge <= MIN_MEANINGFUL_EDGE) {
     return { isValue: false, threshold, note: 'Aucun écart positif significatif.' };
   }
   const isValue = edge >= threshold;

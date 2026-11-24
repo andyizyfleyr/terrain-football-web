@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { apiFetch, describeFailure, type ClientError } from '../lib/clientApi';
 import { Fixture, isFixtureFinished, longDate, Team, timeOf } from '../lib/terrain';
 import { TeamBadge } from './TeamBadge';
 import { AiAnalysisLoader, MIN_ANALYSIS_MS } from './AiAnalysisLoader';
@@ -150,6 +151,11 @@ export function MatchAnalysisPanel({
   const [analysis, setAnalysis] = useState<any>(null);
   const [analysisLoading, setAnalysisLoading] = useState(true);
   const [analysisError, setAnalysisError] = useState('');
+  /** Erreur typée : permet d'afficher « réessayer » seulement si utile. */
+  const [analysisFailure, setAnalysisFailure] = useState<ClientError | null>(null);
+  /** La réponse est exploitable mais partielle (données manquantes). */
+  const [analysisDegraded, setAnalysisDegraded] = useState(false);
+  const [retryToken, setRetryToken] = useState(0);
   const [tab, setTab] = useState<'resume' | 'pronostics' | 'facteurs' | 'analyste' | 'vigilance'>('resume');
   const [loaderElapsed, setLoaderElapsed] = useState(0);
   const [loaderProgress, setLoaderProgress] = useState(0);
@@ -203,42 +209,54 @@ export function MatchAnalysisPanel({
     setAnalysisLoading(true);
     setAnalysis(null);
     setAnalysisError('');
+    setAnalysisFailure(null);
+    setAnalysisDegraded(false);
     setTab('resume');
 
-    fetch(
+    apiFetch<any>(
       `/api/analyze?league=${encodeURIComponent(leagueSlug)}&date=${encodeURIComponent(compactDate)}&match=${encodeURIComponent(matchId)}`
-    )
-      .then(r => {
-        if (!r.ok) throw new Error();
-        return r.json();
-      })
-      .then(d => {
-        if (!active) return;
-        const result = (d.matches || [])[0];
-        if (result?.error) setAnalysisError(result.error);
-        else {
-          setAnalysis(result || null);
-          if (!initialFixture && result?.home && result?.away) {
-            setFixture(prev =>
-              prev || {
-                id: String(result.id || matchId),
-                date: result.date || `${dayKey}T12:00:00Z`,
-                name: `${result.home?.name || ''} - ${result.away?.name || ''}`,
-                home: result.home,
-                away: result.away,
-                venue: result.venue,
-              }
-            );
-          }
+    ).then(outcome => {
+      if (!active) return;
+      if (!outcome.ok) {
+        setAnalysisFailure(outcome.error);
+        setAnalysisError(describeFailure(outcome.error));
+        return;
+      }
+      const payload = outcome.data;
+      const result = (payload?.matches || [])[0];
+      // Réponse partielle : le service a répondu mais certaines données
+      // manquent. On le signale sans masquer l'analyse disponible.
+      setAnalysisDegraded(Boolean(payload?.degraded));
+      if (result?.error) {
+        setAnalysisError(result.error);
+        setAnalysisFailure({
+          code: payload?.code || 'no_data',
+          message: result.error,
+          retryable: Boolean(payload?.retryable),
+          degraded: true,
+          status: 0,
+        });
+      } else {
+        setAnalysis(result || null);
+        if (!initialFixture && result?.home && result?.away) {
+          setFixture(prev =>
+            prev || {
+              id: String(result.id || matchId),
+              date: result.date || `${dayKey}T12:00:00Z`,
+              name: `${result.home?.name || ''} - ${result.away?.name || ''}`,
+              home: result.home,
+              away: result.away,
+              venue: result.venue,
+            }
+          );
         }
-      })
-      .catch(() => active && setAnalysisError('Analyse momentanément indisponible. Réessayez.'))
-      .finally(() => active && setAnalysisLoading(false));
+      }
+    }).finally(() => active && setAnalysisLoading(false));
 
     return () => {
       active = false;
     };
-  }, [leagueSlug, dayKey, matchId, initialFixture]);
+  }, [leagueSlug, dayKey, matchId, initialFixture, retryToken]);
 
   const probabilities = analysis?.probabilities || {};
   const factors = analysis?.factors || {};
@@ -413,7 +431,26 @@ export function MatchAnalysisPanel({
             />
           ) : (
             <>
-          {analysisError && <div className="analysisError">{analysisError}</div>}
+          {analysisError && (
+            <div className="analysisError" role="alert">
+              <span>{analysisError}</span>
+              {analysisFailure?.retryable && (
+                <button
+                  type="button"
+                  className="analysisRetry"
+                  onClick={() => setRetryToken(token => token + 1)}
+                >
+                  Réessayer
+                </button>
+              )}
+            </div>
+          )}
+          {analysisDegraded && !analysisError && (
+            <div className="dataWarning" role="status">
+              Données partielles : certaines statistiques n’ont pas pu être collectées pour
+              ce match. Les probabilités affichées reposent sur les données disponibles.
+            </div>
+          )}
 
           {analysis && tab === 'resume' && (
             <>
