@@ -27,10 +27,11 @@ Variables d'environnement :
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import FastAPI, Query
@@ -187,6 +188,53 @@ async def smoke() -> JSONResponse:
         note("classement renseigné", bool(classement.get("name")), str(classement.get("name")))
         note("style de jeu disponible", bool((factors.get("style") or {}).get("home")), "")
         note("saison cohérente", match.get("league") == "eng.1", str(match.get("league")))
+
+    # Couverture du catalogue : chaque competition annoncee doit etre une
+    # ligue ESPN reelle ET servir des matchs.
+    #
+    # Regression corrigee : la Bundesliga etait cataloguee sous le slug
+    # `deu.1`, inconnu d'ESPN (qui ne publie que `ger.1`). ESPN repondait
+    # HTTP 400 et le calendrier restait vide, sans aucune erreur visible.
+    #
+    # On s'appuie sur le calendrier de saison publie par ESPN plutot que
+    # sur une fenetre de dates : une ligue en pause (coupe du monde, treve)
+    # ne sert aucun match pendant plusieurs semaines, sans etre cassee.
+    uncovered: List[str] = []
+    no_calendar: List[str] = []
+    today_compact = datetime.utcnow().strftime("%Y%m%d")
+
+    async def _check_league(client: httpx.AsyncClient, slug: str) -> Tuple[bool, str]:
+        result = await fetch_day_fixtures(client, slug, today_compact)
+        calendar = result.get("calendar", [])
+        if not calendar:
+            return False, "aucun calendrier ESPN"
+        played = [d for d in calendar if d <= today_compact]
+        for day in reversed(played[-3:]):
+            day_result = await fetch_day_fixtures(client, slug, day)
+            if day_result.get("events"):
+                return True, f"{len(calendar)} journées, match le {day}"
+        return False, "aucun match sur les dernieres journees"
+
+    async with _client() as client:
+        results = await asyncio.gather(
+            *(_check_league(client, l["slug"]) for l in LEAGUE_CATALOG)
+        )
+    for (ok, detail), league in zip(results, LEAGUE_CATALOG):
+        if not ok:
+            (no_calendar if detail == "aucun calendrier ESPN" else uncovered).append(
+                league["slug"]
+            )
+
+    note(
+        "chaque compétition du catalogue est une ligue ESPN connue",
+        not no_calendar,
+        ", ".join(no_calendar) or f"{len(LEAGUE_CATALOG)} ligues",
+    )
+    note(
+        "chaque compétition du catalogue sert des matchs",
+        not uncovered,
+        ", ".join(uncovered) or f"{len(LEAGUE_CATALOG)} ligues",
+    )
 
     failed = [c for c in checks if not c["ok"]]
     payload = {

@@ -298,6 +298,45 @@ with TestClient(api.app) as client:
     smoke_broken = client.get("/api/smoke")
 check("auto-contrôle rouge sur régression", smoke_broken.status_code == 500, str(smoke_broken.status_code))
 check("régression nommée", "forme domicile non vide" in smoke_broken.json().get("failed", []), str(smoke_broken.json().get("failed")))
+# Une competition dont le slug est inconnu d'ESPN (comme le fut `deu.1`)
+# ne renvoie ni calendrier ni match : le controle doit la signaler.
+async def fixtures_with_broken_league(client, league, date_compact):
+    if league == "ger.1":
+        return {"events": [], "calendar": []}
+    return {
+        "events": [
+            {
+                "id": "401879234",
+                "name": "Hull City - Brighton",
+                "home": {"name": "Hull City"},
+                "away": {"name": "Brighton"},
+            }
+        ],
+        "calendar": ["20261122"],
+    }
+
+
+api.fetch_day_fixtures = fixtures_with_broken_league
+with TestClient(api.app) as client:
+    smoke_broken_league = client.get("/api/smoke")
+body = smoke_broken_league.json()
+failed = body.get("failed", [])
+check(
+    "auto-controle rouge sur ligue inconnue d'ESPN",
+    smoke_broken_league.status_code == 500,
+    str(smoke_broken_league.status_code),
+)
+check(
+    "la ligue cassee est nommee",
+    any("ligue ESPN connue" in label for label in failed),
+    str(failed),
+)
+check(
+    "la ligue cassee est identifiee",
+    "ger.1" in str(body.get("checks")),
+    str(body.get("checks"))[-400:],
+)
+
 api.fetch_day_fixtures = espn_module.fetch_day_fixtures
 api.build_base_matches = original_build
 
