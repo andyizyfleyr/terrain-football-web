@@ -35,6 +35,13 @@ export const monthLabel = (value: string) => {
   const parsed = parseDayKey(`${value}-01`);
   return parsed ? new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(parsed) : '';
 };
+/** Libellé compact « nov. 2026 » pour les barres mobiles étroites. */
+export const monthLabelShort = (value: string) => {
+  const parsed = parseDayKey(`${value}-01`);
+  return parsed
+    ? new Intl.DateTimeFormat('fr-FR', { month: 'short', year: 'numeric' }).format(parsed).replace('.', '. ')
+    : '';
+};
 export const longDate = (value: string) => {
   const parsed = parseDayKey(value);
   return parsed

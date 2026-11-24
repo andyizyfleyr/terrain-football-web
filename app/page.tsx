@@ -18,6 +18,7 @@ import {
   MonthFixture,
   monthFixturesCache,
   monthLabel,
+  monthLabelShort,
   pad,
   readResumeSnapshot,
   saveResumeSnapshot,
@@ -56,6 +57,11 @@ export default function Home() {
 
   const [hydrated, setHydrated] = useState(false);
   const [mobileSheet, setMobileSheet] = useState<SheetState>(null);
+  /** Recherche dépliée directement dans la barre collante mobile. */
+  const [mobileExpanded, setMobileExpanded] = useState(false);
+  /** Bouton « revenir en haut » de la liste mobile. */
+  const [showToTop, setShowToTop] = useState(false);
+  const stickyBarRef = useRef<HTMLDivElement | null>(null);
 
   const pendingRestoreRef = useRef<{ scrollY: number; matchId: string } | null>(null);
 
@@ -322,6 +328,51 @@ export default function Home() {
     };
   }, [mobileSheet, closeMobileSheet]);
 
+  // 7. Suspend la restauration de scroll pendant une lecture sur mobile
+  useEffect(() => {
+    if (!mobileSheet && !mobileExpanded) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMobileExpanded(false);
+        if (mobileSheet) closeMobileSheet();
+      }
+    };
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [mobileSheet, mobileExpanded, closeMobileSheet]);
+
+  // 8. Hauteur réelle du bloc collant mobile : les en-têtes de journée et les
+  //    ancres s'y accrochent, la hauteur dépendant de la police du système.
+  useEffect(() => {
+    const el = stickyBarRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const apply = () => {
+      const height = Math.round(el.getBoundingClientRect().height);
+      if (height > 0) document.documentElement.style.setProperty('--m-sticky-h', `${height}px`);
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [search, counts.upcoming, counts.finished]);
+
+  // 9. Bouton « haut de page » au-delà d'un écran de défilement
+  useEffect(() => {
+    const onScroll = () => setShowToTop(window.scrollY > 620);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  const goToTop = useCallback(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
   const handleOpenMatch = (event: React.MouseEvent<HTMLAnchorElement>, item: MonthFixture) => {
     // Laisser le comportement natif pour Ctrl/Cmd+clic ou clic molette
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
@@ -399,6 +450,20 @@ export default function Home() {
 
   return (
     <main className="appShell">
+      <a
+        className="skipLink"
+        href="#rencontres"
+        onClick={event => {
+          event.preventDefault();
+          const target = document.getElementById('rencontres');
+          if (!target) return;
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          target.setAttribute('tabindex', '-1');
+          target.focus({ preventScroll: true });
+        }}
+      >
+        Aller au calendrier
+      </a>
       <header className="appHeader">
         <a className="brand" href="#top" aria-label="Terrain, accueil">
           <span className="brandMark">T</span>
@@ -448,12 +513,76 @@ export default function Home() {
         </div>
       </section>
 
+      {/* ---- Mobile : bloc collant (filtres rapides + statut) ---- */}
+      <div className="mSticky" ref={stickyBarRef}>
+        <div className="mBar">
+          <button type="button" className="mBarLeague" onClick={() => setMobileExpanded(true)} aria-label="Changer de compétition et de mois">
+            <span className="mBarIcon" aria-hidden="true">
+              ◈
+            </span>
+            <span className="mBarText">
+              <small>Compétition</small>
+              <b>{currentLeagueName}</b>
+            </span>
+            <span className="mBarChevron" aria-hidden="true">
+              ▾
+            </span>
+          </button>
+          <div className="mBarMonth">
+            <button type="button" className="mBarStep" onClick={() => changeMonth(-1)} aria-label="Mois précédent">
+              ‹
+            </button>
+            <button type="button" className="mBarMonthLabel" onClick={() => setMobileExpanded(true)} aria-label="Choisir un mois">
+              <b>
+                <span className="mMonthLong">{monthLabel(month)}</span>
+                <span className="mMonthShort">{monthLabelShort(month)}</span>
+              </b>
+              <small>{monthMatchCount} matchs</small>
+            </button>
+            <button type="button" className="mBarStep" onClick={() => changeMonth(1)} aria-label="Mois suivant">
+              ›
+            </button>
+          </div>
+          <button
+            type="button"
+            className="mBarFilterBtn"
+            onClick={() => setMobileExpanded(true)}
+            aria-label="Ouvrir les filtres"
+            aria-expanded={mobileExpanded}
+          >
+            ☰
+            {search.trim() ? <i aria-hidden="true">1</i> : null}
+          </button>
+        </div>
+        <div className="mTabs" role="tablist" aria-label="Statut des rencontres">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={statusTab === 'upcoming'}
+            className={`mTab ${statusTab === 'upcoming' ? 'mTabActive' : ''}`}
+            onClick={() => setStatusTab('upcoming')}
+          >
+            À venir <b>{counts.upcoming}</b>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={statusTab === 'finished'}
+            className={`mTab ${statusTab === 'finished' ? 'mTabActive' : ''}`}
+            onClick={() => setStatusTab('finished')}
+          >
+            Terminés <b>{counts.finished}</b>
+          </button>
+        </div>
+      </div>
+
+      {/* ---- Desktop : barre d'outils historique ---- */}
       <section className="toolbar" aria-label="Filtres du calendrier">
         <label className="selectField">
           <span className="fieldIcon">◈</span>
           <span className="fieldCopy">
             <small>COMPÉTITION</small>
-            <select value={league} onChange={event => changeLeague(event.target.value)}>
+            <select value={league} aria-label="Choisir une compétition" onChange={event => changeLeague(event.target.value)}>
               {leagues.map(item => (
                 <option key={item.slug} value={item.slug}>
                   {item.name} · {item.country}
@@ -535,9 +664,12 @@ export default function Home() {
                 <label className="matchSearch monthSearch">
                   <span>⌕</span>
                   <input
+                    type="search"
                     value={search}
                     onChange={event => setSearch(event.target.value)}
                     placeholder="Rechercher une équipe, un stade ou une date"
+                    aria-label="Rechercher une rencontre"
+                    autoComplete="off"
                   />
                 </label>
                 <button className="scanButton monthScanButton" onClick={scanMonth} disabled={screening || monthLoading}>
@@ -555,10 +687,15 @@ export default function Home() {
               {visibleFixtures.length} match{visibleFixtures.length !== 1 ? 's' : ''}
             </span>
           </div>
+          {search.trim() ? (
+            <button type="button" className="mActiveSearch" onClick={() => setSearch('')}>
+              Recherche : « {search.trim()} » <span>✕ Effacer</span>
+            </button>
+          ) : null}
         </div>
 
-        {/* Onglets (Tabs) : À venir (par défaut) / Terminés */}
-        <div className="statusTabsBar" role="tablist" aria-label="Statut des rencontres">
+        {/* Onglets (desktop) : sur mobile, ils vivent dans le bloc collant. */}
+        <div className="statusTabsBar statusTabsDesktop" role="tablist" aria-label="Statut des rencontres">
           <button
             type="button"
             role="tab"
@@ -640,6 +777,139 @@ export default function Home() {
           </div>
         )}
       </section>
+
+      <button type="button" className="mToTop" onClick={goToTop} aria-label="Revenir en haut de la liste" aria-hidden={!showToTop} style={showToTop ? undefined : { display: 'none' }}>
+        ↑
+      </button>
+
+      {/* Feuille de filtres mobile : compétition, mois, statut, recherche */}
+      {mobileExpanded ? (
+        <div
+          className="mSheetBackdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Filtres du calendrier"
+          onClick={e => {
+            if (e.target === e.currentTarget) setMobileExpanded(false);
+          }}
+        >
+          <div className="mSheet">
+            <div className="mSheetHead">
+              <span className="bottomSheetGrabber" />
+              <div className="mSheetTitleRow">
+                <div>
+                  <b className="mSheetTitle">Filtres du calendrier</b>
+                  <small>
+                    {monthMatchCount} rencontre{monthMatchCount > 1 ? 's' : ''} sur {datesWithMatches.length} journée
+                    {datesWithMatches.length > 1 ? 's' : ''} ce mois
+                  </small>
+                </div>
+                <button type="button" className="mSheetClose" onClick={() => setMobileExpanded(false)} aria-label="Fermer les filtres">
+                  ✕
+                </button>
+              </div>
+            </div>
+            <div className="mSheetBody">
+              <label className="mField">
+                <small>Compétition</small>
+                <select value={league} onChange={event => changeLeague(event.target.value)}>
+                  {leagues.map(item => (
+                    <option key={item.slug} value={item.slug}>
+                      {item.name} · {item.country}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="mField">
+                <div className="mFieldRowHead">
+                  <small>Calendrier mensuel</small>
+                  <button
+                    type="button"
+                    className="mLinkButton"
+                    onClick={() => {
+                      setMonth(todayKey().slice(0, 7));
+                      setLastMatchId('');
+                    }}
+                  >
+                    Ce mois-ci
+                  </button>
+                </div>
+                <div className="mStepper">
+                  <button type="button" onClick={() => changeMonth(-1)} aria-label="Mois précédent">
+                    ‹
+                  </button>
+                  <b>{monthLabel(month)}</b>
+                  <button type="button" onClick={() => changeMonth(1)} aria-label="Mois suivant">
+                    ›
+                  </button>
+                </div>
+              </div>
+
+              <div className="mField">
+                <small>Statut</small>
+                <div className="mSeg" role="tablist" aria-label="Statut des rencontres">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={statusTab === 'upcoming'}
+                    className={statusTab === 'upcoming' ? 'isActive' : ''}
+                    onClick={() => setStatusTab('upcoming')}
+                  >
+                    À venir · {counts.upcoming}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={statusTab === 'finished'}
+                    className={statusTab === 'finished' ? 'isActive' : ''}
+                    onClick={() => setStatusTab('finished')}
+                  >
+                    Terminés · {counts.finished}
+                  </button>
+                </div>
+              </div>
+
+              <label className="mField">
+                <small>Recherche</small>
+                <span className="mSearchBox">
+                  <span aria-hidden="true">⌕</span>
+                  <input
+                    value={search}
+                    onChange={event => setSearch(event.target.value)}
+                    placeholder="Équipe, stade ou date"
+                    aria-label="Rechercher une rencontre"
+                    inputMode="search"
+                    enterKeyHint="search"
+                    autoComplete="off"
+                  />
+                  {search ? (
+                    <button type="button" onClick={() => setSearch('')} aria-label="Effacer la recherche">
+                      ✕
+                    </button>
+                  ) : null}
+                </span>
+              </label>
+            </div>
+            <div className="mSheetFoot">
+              <button
+                type="button"
+                className="mGhost"
+                onClick={() => {
+                  setSearch('');
+                  setStatusTab('upcoming');
+                  setMonth(todayKey().slice(0, 7));
+                }}
+              >
+                Réinitialiser
+              </button>
+              <button type="button" className="mPrimary" onClick={() => setMobileExpanded(false)}>
+                Voir les {visibleFixtures.length} matchs
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Bottom Sheet sur mobile */}
       {mobileSheet && (
