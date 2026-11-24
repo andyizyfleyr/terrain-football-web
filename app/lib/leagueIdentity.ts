@@ -20,33 +20,61 @@
  * l'identité réelle de la ligue, et non d'une constante.
  */
 
-/** Identifiants de ligue FotMob → slug de championnat (convention ESPN). */
+/**
+ * Identifiants de ligue FotMob → slug de championnat (convention ESPN).
+ *
+ * Ces identifiants sont releves sur la source elle-meme
+ * (`GET https://www.fotmob.com/api/data/leagues?id=<id>`), qui publie
+ * `details.id` et `details.name` pour chaque ligue. Chaque entree de
+ * cette table a ete verifiee dans ce payload : une table devinee
+ * confond les Divisions (Serie A et Ligue 1, MLS et Liga Portugal)
+ * et pollue silencieusement le regroupement du backtest.
+ */
 export const LEAGUE_SLUG_BY_FOTMOB_ID: Record<number, string> = {
   47: 'eng.1', // Premier League
-  89: 'eng.2', // Championship
+  48: 'eng.2', // Championship
   87: 'esp.1', // LaLiga
   140: 'esp.2', // LaLiga2
-  54: 'deu.1', // Bundesliga
-  53: 'ita.1', // Serie A
-  55: 'fra.1', // Ligue 1
-  61: 'ned.1', // Eredivisie
-  130: 'por.1', // Liga Portugal
-  42: 'bel.1', // Jupiler Pro League
-  22: 'mex.1', // Liga MX
-  10: 'usa.1', // MLS
+  55: 'ita.1', // Serie A
+  86: 'ita.2', // Serie B
+  53: 'fra.1', // Ligue 1
+  110: 'fra.2', // Ligue 2
+  57: 'ned.1', // Eredivisie
+  61: 'por.1', // Liga Portugal
+  40: 'bel.1', // Jupiler Pro League
+  54: 'ger.1', // Bundesliga
+  64: 'sco.1', // Scottish Premiership
+  71: 'tur.1', // Super Lig
+  230: 'mex.1', // Liga MX
+  130: 'usa.1', // MLS
+  42: 'uefa.champions', // Champions League
+  73: 'uefa.europa', // Europa League
+  268: 'bra.1', // Serie A (Bresil)
+  112: 'arg.1', // Liga Profesional (Argentine)
 };
 
-/** Slugs connus par leur nom de ligue FotMob (quand l'id manque). */
+/**
+ * Slugs connus par leur nom de ligue FotMob (quand l'id manque).
+ * Les noms sont normalises (minuscules, sans accent ni separateur) ;
+ * voir `normalizeName`.
+ */
 export const LEAGUE_SLUG_BY_NAME: Record<string, string> = {
   premierleague: 'eng.1',
   championship: 'eng.2',
   laliga: 'esp.1',
   laliga2: 'esp.2',
-  bundesliga: 'deu.1',
+  bundesliga: 'ger.1',
   seriea: 'ita.1',
+  serieb: 'ita.2',
   ligue1: 'fra.1',
+  ligue2: 'fra.2',
   eredivisie: 'ned.1',
   ligaportugal: 'por.1',
+  firstdivisiona: 'bel.1',
+  premiership: 'sco.1',
+  superlig: 'tur.1',
+  ligamx: 'mex.1',
+  mls: 'usa.1',
 };
 
 export type LeagueIdentity = {

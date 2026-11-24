@@ -27,10 +27,11 @@ Variables d'environnement :
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import FastAPI, Query
@@ -110,11 +111,24 @@ async def fixtures(
     league: str = Query("eng.1"),
     date: str = Query(""),
 ) -> JSONResponse:
-    """Matchs d'une journee au format du calendrier (front)."""
+    """Matchs d'une journee au format du calendrier (front).
+
+    `calendar` liste les journees de la saison publiees par ESPN. Il
+    permet au client de retrouver une journee reellement jouee, y
+    compris quand la ligue est en pause (coupe du monde, treve) : le
+    calendrier et les matchs sont servis par la meme requete ESPN.
+    """
     date_compact = _normalize_date(date)
     async with _client() as client:
-        events = await fetch_day_fixtures(client, league, date_compact)
-    return JSONResponse({"league": league, "date": date_compact, "events": events})
+        result = await fetch_day_fixtures(client, league, date_compact)
+    return JSONResponse(
+        {
+            "league": league,
+            "date": date_compact,
+            "events": result.get("events", []),
+            "calendar": result.get("calendar", []),
+        }
+    )
 
 
 @app.get("/api/smoke")
@@ -145,7 +159,8 @@ async def smoke() -> JSONResponse:
         day = today - timedelta(days=back)
         date_compact = day.strftime("%Y%m%d")
         async with _client() as client:
-            events = await fetch_day_fixtures(client, "eng.1", date_compact)
+            result = await fetch_day_fixtures(client, "eng.1", date_compact)
+        events = result.get("events", [])
         if events:
             reference = events[0]
             reference_date = date_compact
@@ -173,6 +188,53 @@ async def smoke() -> JSONResponse:
         note("classement renseigné", bool(classement.get("name")), str(classement.get("name")))
         note("style de jeu disponible", bool((factors.get("style") or {}).get("home")), "")
         note("saison cohérente", match.get("league") == "eng.1", str(match.get("league")))
+
+    # Couverture du catalogue : chaque competition annoncee doit etre une
+    # ligue ESPN reelle ET servir des matchs.
+    #
+    # Regression corrigee : la Bundesliga etait cataloguee sous le slug
+    # `deu.1`, inconnu d'ESPN (qui ne publie que `ger.1`). ESPN repondait
+    # HTTP 400 et le calendrier restait vide, sans aucune erreur visible.
+    #
+    # On s'appuie sur le calendrier de saison publie par ESPN plutot que
+    # sur une fenetre de dates : une ligue en pause (coupe du monde, treve)
+    # ne sert aucun match pendant plusieurs semaines, sans etre cassee.
+    uncovered: List[str] = []
+    no_calendar: List[str] = []
+    today_compact = datetime.utcnow().strftime("%Y%m%d")
+
+    async def _check_league(client: httpx.AsyncClient, slug: str) -> Tuple[bool, str]:
+        result = await fetch_day_fixtures(client, slug, today_compact)
+        calendar = result.get("calendar", [])
+        if not calendar:
+            return False, "aucun calendrier ESPN"
+        played = [d for d in calendar if d <= today_compact]
+        for day in reversed(played[-3:]):
+            day_result = await fetch_day_fixtures(client, slug, day)
+            if day_result.get("events"):
+                return True, f"{len(calendar)} journées, match le {day}"
+        return False, "aucun match sur les dernieres journees"
+
+    async with _client() as client:
+        results = await asyncio.gather(
+            *(_check_league(client, l["slug"]) for l in LEAGUE_CATALOG)
+        )
+    for (ok, detail), league in zip(results, LEAGUE_CATALOG):
+        if not ok:
+            (no_calendar if detail == "aucun calendrier ESPN" else uncovered).append(
+                league["slug"]
+            )
+
+    note(
+        "chaque compétition du catalogue est une ligue ESPN connue",
+        not no_calendar,
+        ", ".join(no_calendar) or f"{len(LEAGUE_CATALOG)} ligues",
+    )
+    note(
+        "chaque compétition du catalogue sert des matchs",
+        not uncovered,
+        ", ".join(uncovered) or f"{len(LEAGUE_CATALOG)} ligues",
+    )
 
     failed = [c for c in checks if not c["ok"]]
     payload = {
@@ -208,7 +270,13 @@ async def health() -> JSONResponse:
 @app.get("/api/debug/espn")
 async def debug_espn(league: str = "eng.1", team: str = "306") -> JSONResponse:
     """Diagnostic temporaire de l'accès ESPN (statut, taille, structure)."""
-    from espn import ESPN_BASE, _client
+    from espn import ESPN_BASE, _client, resolve_league_slug
+
+    # Le diagnostic interroge ESPN en direct : il doit donc viser le
+    # slug ESPN effectif, sinon il rapporte une erreur 400 pour un
+    # simple alias de nom (ex. `deu.1` -> `ger.1`) et masque la
+    # reelle cause d'un calendrier vide.
+    league = resolve_league_slug(league)
 
     report = {}
     # Le client doit rester ouvert jusqu'a la sonde du calendrier d'equipe :

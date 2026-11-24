@@ -132,6 +132,82 @@ console.log('3. Catalogue des compétitions');
   check('catalogue servi', res.ok && leagues.length >= 10, `${leagues.length} compétitions`);
   check('Premier League présente', leagues.some((l) => l.slug === 'eng.1'), '');
   check('LaLiga présente', leagues.some((l) => l.slug === 'esp.1'), '');
+  check(
+    'Bundesliga présente sous son slug ESPN',
+    leagues.some((l) => l.slug === 'ger.1'),
+    leagues.map((l) => l.slug).join(',')
+  );
+}
+
+console.log('');
+console.log('3b. Couverture de chaque compétition cataloguée');
+{
+  // Regression corrigee : la Bundesliga etait cataloguee sous le slug
+  // `deu.1`, inconnu d'ESPN (qui ne publie que `ger.1`). ESPN repondait
+  // HTTP 400 et le calendrier restait vide - sans aucune erreur visible.
+  //
+  // On verifie donc que TOUTE competition annoncee sert un calendrier :
+  // un slug ESPN invalide se voit immediatement.
+  const res = await getJson(`${API_BASE}/api/leagues`);
+  const leagues = res.body?.leagues || [];
+
+  // Un catalogue vide ne doit pas passer pour une couverture complete :
+  // sans competition a tester, la boucle ne testerait rien.
+  check('catalogue exploitable pour la couverture', leagues.length > 0, `${leagues.length} competitions`);
+
+  // Une ligue peut etre en pause (coupe du monde, treve) et ne servir
+  // aucun match pendant plusieurs semaines : il faut donc une journee
+  // REELLEMENT jouee, pas une simple fenetre de dates.
+  //
+  // ESPN publie le calendrier de la saison dans le scoreboard, et l'API
+  // le relaie : on s'en sert pour retrouver la derniere journee jouee.
+  const today = new Date();
+  const todayCompact = compact(today);
+
+  const empty = [];
+  const withCalendar = [];
+  for (const league of leagues) {
+    const probe = await getJson(`${API_BASE}/api/fixtures?league=${league.slug}&date=${todayCompact}`);
+    const calendar = probe.body?.calendar || [];
+
+    // Journees deja jouees, de la plus recente a la plus ancienne.
+    const played = calendar.filter((day) => day < todayCompact).sort().reverse();
+
+    let served = false;
+    for (const day of played.slice(0, 3)) {
+      const dayRes = await getJson(`${API_BASE}/api/fixtures?league=${league.slug}&date=${day}`);
+      if (dayRes.ok && (dayRes.body?.events || []).length) {
+        served = true;
+        break;
+      }
+    }
+
+    // Repli : si l'API ne renvoie pas de calendrier, on balaie une
+    // fenetre de dates (au cas ou le champ viendrait a manquer).
+    if (!served && !calendar.length) {
+      for (let back = 1; back <= 14; back += 1) {
+        const date = compact(shiftDays(today, -back));
+        const dayRes = await getJson(`${API_BASE}/api/fixtures?league=${league.slug}&date=${date}`);
+        if (dayRes.ok && (dayRes.body?.events || []).length) {
+          served = true;
+          break;
+        }
+      }
+    }
+
+    if (!served) empty.push(league.slug);
+    if (calendar.length) withCalendar.push(league.slug);
+  }
+  check(
+    'toutes les competitions cataloguees servent un calendrier',
+    leagues.length > 0 && empty.length === 0,
+    `sans match : ${empty.join(', ')}`
+  );
+  check(
+    'chaque competition publie les journees de sa saison',
+    leagues.length > 0 && withCalendar.length === leagues.length,
+    `${withCalendar.length}/${leagues.length} competitions avec calendrier`
+  );
 }
 
 console.log('');
