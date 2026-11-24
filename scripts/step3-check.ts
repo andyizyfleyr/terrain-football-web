@@ -209,6 +209,9 @@ console.log('5. Registre des marchés dérivés');
     statuses.find(s => s.id === 'total-odd')?.status === 'non validé');
   check('un marché avec cote mais sans mesure est « à surveiller »',
     statuses.find(s => s.id === 'over-25')?.status === 'à surveiller');
+  check('le handicap asiatique explique l’absence de prédiction',
+    (statuses.find(s => s.id === 'asian-handicap')?.note || '').includes('probabilité pour lui'),
+    statuses.find(s => s.id === 'asian-handicap')?.note);
 
   const measured = buildMarketStatuses({
     markets: {

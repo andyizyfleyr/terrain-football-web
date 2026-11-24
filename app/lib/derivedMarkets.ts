@@ -33,6 +33,14 @@ export type DerivedMarketDefinition = {
   description: string;
   /** true si une cote de marché réelle existe dans les sources publiques. */
   hasRealOdds: boolean;
+  /**
+   * Raison de la non-validation, quand le marché n'est pas validé :
+   *   - « no-odds »            : aucune cote de référence n'existe ;
+   *   - « no-model-prediction »: la cote existe, mais le moteur
+   *                             n'annonce pas ce marché (rien à lui
+   *                             confronter).
+   */
+  unvalidatedReason?: 'no-odds' | 'no-model-prediction';
 };
 
 export const DERIVED_MARKETS: DerivedMarketDefinition[] = [
@@ -124,10 +132,12 @@ export const DERIVED_MARKETS: DerivedMarketDefinition[] = [
     id: 'asian-handicap',
     label: 'Handicap asiatique',
     description: 'Résultat après application du handicap de la ligne.',
-    // Le moteur n'annonce PAS le handicap : la cote existe, mais il n'y
-    // a aucune prédiction à lui confronter. Le marché reste donc non
-    // validé (cote disponible, prédiction absente).
+    // Le moteur n'annonce PAS le handicap : la cote existe (14 568
+    // rencontres sur le jeu de référence), mais il n'y a aucune
+    // prédiction à lui confronter. Le marché reste donc non validé, et
+    // la raison est explicitée : ce n'est pas un défaut de données.
     hasRealOdds: false,
+    unvalidatedReason: 'no-model-prediction',
   },
   {
     id: 'one-x-two',
@@ -190,9 +200,12 @@ export function buildMarketStatuses(
         averageGap: result ? Number(result.averageGap.toFixed(4)) : null,
         modelLogLoss: result?.logLoss ?? null,
         marketLogLoss: result?.marketLogLoss ?? null,
-        note: market.hasRealOdds
-          ? "Aucune cote de marché n'a pu être comparée à ce marché sur le jeu de données de référence : la probabilité annoncée n'est PAS validée."
-          : "Ce marché n'a pas de cote de référence dans les sources publiques : la probabilité annoncée est une ESTIMATION du modèle, sans confrontation possible au marché.",
+        note:
+          market.unvalidatedReason === 'no-model-prediction'
+            ? "Une cote de marché existe pour ce marché, mais le moteur n'annonce pas de probabilité pour lui : il n'y a donc rien à confronter. La valeur annoncée est une ESTIMATION du modèle."
+            : market.hasRealOdds
+              ? "Aucune cote de marché n'a pu être comparée à ce marché sur le jeu de données de référence : la probabilité annoncée n'est PAS validée."
+              : "Ce marché n'a pas de cote de référence dans les sources publiques : la probabilité annoncée est une ESTIMATION du modèle, sans confrontation possible au marché.",
       };
     }
     const gap = Number(result.averageGap.toFixed(4));
