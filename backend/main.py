@@ -163,8 +163,24 @@ async def debug_espn(league: str = "eng.1", team: str = "306") -> JSONResponse:
             )
         report["team_history"] = {
             "count": len(history),
-            "completed": len([m for m in history if m.get("gf") is not None]),
+            "completed": len(
+                [
+                    m
+                    for m in history
+                    if m.get("homeGoals") is not None and m.get("awayGoals") is not None
+                ]
+            ),
             "last": history[-3:],
+        }
+        # Chemin de fetch reellement suivi par l'ingestion
+        report["fetch_path"] = {
+            "source": "calendrier d'equipe ESPN avec saison explicite",
+            "url": (
+                f"https://site.api.espn.com/apis/site/v2/sports/soccer/"
+                f"{league}/teams/{team}/schedule?season=2026"
+            ),
+            "fallback": "scoreboard de ligue (dates=annee, limit=1000)",
+            "ingestion_season": 2026,
         }
     except Exception as exc:  # pragma: no cover - diagnostic
         report["probe_error"] = f"{type(exc).__name__}: {exc}"
