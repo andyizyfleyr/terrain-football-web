@@ -515,6 +515,32 @@ export function MatchAnalysisPanel({
                 </div>
               )}
 
+              {/* Étiquettes de la rencontre : elles résument ce que
+                  l'analyse mesure, avec la raison chiffrée de chacune. */}
+              {Array.isArray(analysis.tags) && analysis.tags.length > 0 && (
+                <div className="matchTagsPanel">
+                  <span className="sectionKicker">ÉTIQUETTES DE LA RENCONTRE</span>
+                  <div className="matchTagList">
+                    {analysis.tags.map((tag: any) => (
+                      <div key={tag.id} className={`matchTagRow matchTag_${String(tag.id).replace('-', '_')}`}>
+                        <span className="matchTagEmoji" aria-hidden="true">
+                          {tag.emoji}
+                        </span>
+                        <b>{tag.label}</b>
+                        <p>{tag.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {Array.isArray(analysis.tagWarnings) && analysis.tagWarnings.length > 0 && (
+                    <ul className="matchTagWarnings">
+                      {analysis.tagWarnings.map((warning: string, index: number) => (
+                        <li key={index}>{warning}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
               {(freshHome < 5 || freshAway < 5) && (
                 <div className="dataWarning">
                   Échantillon récent incomplet. Les données plus anciennes sont exclues ; la confiance dans l’estimation est donc plus

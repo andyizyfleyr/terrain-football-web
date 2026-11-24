@@ -23,6 +23,7 @@ import type {
 import { devigMarketOdds, mergeMarketOdds, oddsToMarketPayload, parseMarketOdds } from './marketOdds';
 import type { MarketOdds, MarketProvider, ParsedOdds } from './marketOdds';
 import { devigThreeWayDecimal } from './devig';
+import { computeMatchTags } from './matchTags';
 
 const FOTMOB_BASE = 'https://www.fotmob.com/api/data';
 const FOTMOB_HEADERS: Record<string, string> = {
@@ -2159,6 +2160,45 @@ export async function enrichEspnMatchWithFotmob(params: {
     note: extraNotes.join(' '),
   };
 
+  // 8bis. ÉTIQUETTES DE MATCH
+  // Elles ne modifient NI les probabilités NI le moteur : elles
+  // décrivent ce que l'analyse vient de mesurer. Deux sources :
+  //   - rapport complet du moteur (vue match) : toutes les données ;
+  //   - calque brut (scan de journée) : seules les données réellement
+  //     disponibles, les autres étant signalées comme indisponibles.
+  const kickoffMs = Date.parse(espnMatch.date || '');
+  const minutesToKickoff = Number.isFinite(kickoffMs)
+    ? (kickoffMs - Date.now()) / 60_000
+    : null;
+  const tagInput = analystReport
+    ? {
+        ...analystReport,
+        homeName: espnMatch.home.name,
+        awayName: espnMatch.away.name,
+        minutesToKickoff,
+      }
+    : {
+        homeName: espnMatch.home.name,
+        awayName: espnMatch.away.name,
+        minutesToKickoff,
+        probabilities: finalProbabilities,
+        expectedGoals: finalExpectedGoals,
+        market: marketPayload
+          ? {
+              available: true,
+              // Le payload de marché porte les cotes À PLAT (home, draw,
+              // away) : il n'a pas de sous-objet `odds`.
+              odds: {
+                home: typeof marketPayload.home === 'number' ? marketPayload.home : null,
+                draw: typeof marketPayload.draw === 'number' ? marketPayload.draw : null,
+                away: typeof marketPayload.away === 'number' ? marketPayload.away : null,
+                over25: typeof marketPayload.over25 === 'number' ? marketPayload.over25 : null,
+              },
+            }
+          : null,
+      };
+  const tagResult = computeMatchTags(tagInput as any);
+
   // Limitations mises à jour honnêtement
   const updatedLimitations = [
     'Probabilités estimées par un modèle statistique hybride (Poisson + xG/absences + forme récente) : jamais garanties.',
@@ -2176,6 +2216,10 @@ export async function enrichEspnMatchWithFotmob(params: {
     probabilities: finalProbabilities,
     topScores: finalTopScores,
     analyst: analystReport,
+    // Étiquettes de match (champ optionnel) : une par qualification,
+    // chacune avec sa raison chiffrée.
+    tags: tagResult.tags,
+    tagWarnings: tagResult.warnings,
     vigilance: {
       score: vigilanceScore,
       level: vigilanceLevel,

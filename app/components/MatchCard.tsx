@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { countdownLabel, Fixture, isFixtureFinished, timeOf } from '../lib/terrain';
+import { pickBadges, type MatchTag } from '../lib/matchTags';
 import { TeamBadge } from './TeamBadge';
 
 type MatchCardProps = {
@@ -10,15 +11,18 @@ type MatchCardProps = {
   onOpen?: (event: React.MouseEvent<HTMLAnchorElement>, fixture: Fixture) => void;
   highlighted?: boolean;
   vigilance?: any;
+  /** Étiquettes de la rencontre (3 maximum affichées). */
+  tags?: MatchTag[] | null;
 };
 
 /**
  * Carte de rencontre redessinée : rail horaire à gauche, équipes au centre,
  * résultat et action à droite. Compacte sur mobile, lisible sur desktop.
  */
-export function MatchCard({ fixture, href, onOpen, highlighted, vigilance }: MatchCardProps) {
+export function MatchCard({ fixture, href, onOpen, highlighted, vigilance, tags }: MatchCardProps) {
   const finished = isFixtureFinished(fixture);
   const countdown = countdownLabel(fixture.date);
+  const badges = pickBadges(tags);
 
   return (
     <Link
@@ -42,6 +46,20 @@ export function MatchCard({ fixture, href, onOpen, highlighted, vigilance }: Mat
           <b>{fixture.away?.name}</b>
         </span>
         <span className="matchCardVenue">{fixture.venue || 'Lieu non renseigné'}</span>
+        {badges.length > 0 && (
+          <span className="matchCardTags">
+            {badges.map(tag => (
+              <span
+                key={tag.id}
+                className={`matchTagBadge matchTag_${tag.id.replace('-', '_')}`}
+                title={tag.reason}
+              >
+                <i aria-hidden="true">{tag.emoji}</i>
+                {tag.label}
+              </span>
+            ))}
+          </span>
+        )}
       </span>
 
       <span className="matchCardSide">

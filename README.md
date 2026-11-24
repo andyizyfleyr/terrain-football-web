@@ -58,6 +58,7 @@ backend/espn.py                 client ESPN, caches bornés
 |---|---|
 | `npm run check` | suite de contrôles complète (devig, marché, modèle, backtest, étape 3) |
 | `npm run check:step3` | contrôles des modules de l’étape 3 |
+| `npm run check:tags` | contrôles des étiquettes de match (seuils, données manquantes, NaN) |
 | `npm run check:backtest` | anti-fuite, marche avant, calibrage (publie les métriques) |
 | `npm run check:backtest:strict` | backtest chronologique strict multi-championnat → `data/backtest-report.json` |
 | `npm run check:ablation` | contribution de chaque module → `data/ablation-report.json` |
@@ -109,6 +110,35 @@ module n'est retiré automatiquement : ces conclusions sont des propositions.
 Les 14 marchés non validés sont annoncés comme des **estimations du
 modèle** dans l'interface : un but de la tête, le score à la mi-temps ou le
 handicap asiatique n'ont pas de cote de marché à laquelle les confronter.
+
+## Étiquettes de match
+
+Chaque rencontre peut porter une ou plusieurs étiquettes, calculées par une
+fonction pure (`app/lib/matchTags.ts`) à partir des champs réels du rapport
+d’analyse. Tous les seuils sont regroupés dans `MATCH_TAG_CONFIG`.
+
+| Étiquette | Règle | Données lues |
+|---|---|---|
+| 💎 Value | écart ≥ 2 % (cote ≤ 3), 5 % (3 à 6), 8 % (> 6) ; +2 % si le match est serré | `market.edges`, `market.odds`, `confidence` |
+| ⚖️ Serré | meilleure probabilité < 42 % et écart entre les deux victoires < 10 pts | `market.calibrated` |
+| 🏆 Favori net | favori ≥ 55 % et ≥ 25 pts d’avance sur la deuxième issue | `market.calibrated` |
+| 🔥 Beaucoup de buts | buts attendus ≥ 2,9 ou +2,5 buts ≥ 60 % | `simulation.expectedGoals`, `simulation.over25` |
+| 🧊 Peu de buts | buts attendus ≤ 2,2 ou +2,5 buts ≤ 40 % | `simulation.expectedGoals`, `simulation.over25` |
+| ⚠️ Piège | composition non confirmée, fatigue haute, enjeu faible ou confiance basse | `absences.officialLineup`, `context`, `confidence` |
+
+Règles tenues :
+
+- une donnée absente n’est jamais remplacée par une supposition : l’étiquette
+  est omise et un avertissement l’explique ;
+- aucun nombre `NaN` n’est produit ;
+- les étiquettes ne modifient **ni** les probabilités **ni** la logique du
+  moteur : elles ne décrivent que ce que l’analyse mesure déjà ;
+- la détection de « valeur » respecte le verdict du moteur : tant qu’aucun
+  seuil de valeur n’est démontré sur l’historique de référence, aucune
+  étiquette « Value » n’est annoncée.
+
+Le scan du mois produit ces étiquettes sans appel réseau supplémentaire :
+elles voyagent dans la réponse d’analyse (`matches[].tags`).
 
 ## Défauts trouvés et corrigés par cette validation
 

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MatchAnalysisPanel } from './components/MatchAnalysisPanel';
 import { apiFetch, type ClientError } from './lib/clientApi';
 import { MatchCard } from './components/MatchCard';
+import { MATCH_TAG_CONFIG, MATCH_TAG_LABELS, type MatchTag, type MatchTagId } from './lib/matchTags';
 import {
   buildMatchUrl,
   cachedLeagues,
@@ -46,6 +47,11 @@ export default function Home() {
   const [monthLoading, setMonthLoading] = useState(true);
   const [screening, setScreening] = useState(false);
   const [screenedScores, setScreenedScores] = useState<Record<string, any>>({});
+  /** Étiquettes des rencontres scannées (clé : identifiant de match). */
+  const [screenedTags, setScreenedTags] = useState<Record<string, MatchTag[]>>({});
+  /** Filtres d'étiquettes actifs : une rencontre est gardée si elle porte
+   *  au moins une des étiquettes sélectionnées. */
+  const [tagFilters, setTagFilters] = useState<MatchTagId[]>([]);
   const [calendarError, setCalendarError] = useState('');
   /** Réponse partielle : certaines journées n'ont pas pu être chargées. */
   const [calendarDegraded, setCalendarDegraded] = useState(false);
@@ -168,6 +174,10 @@ export default function Home() {
     setCalendarError('');
     setDayEvents({});
     setScreenedScores({});
+    // Les étiquettes scannées appartiennent au mois affiché : on les
+    // efface pour ne pas filtrer sur des rencontres disparues.
+    setScreenedTags({});
+    setTagFilters([]);
 
     const load = async () => {
       const combined: DayEvents = {};
@@ -247,12 +257,35 @@ export default function Home() {
       const done = isFixtureFinished(item);
       if (statusTab === 'finished' && !done) return false;
       if (statusTab === 'upcoming' && done) return false;
+      if (tagFilters.length) {
+        // Une rencontre est conservée si elle porte au moins une des
+        // étiquettes sélectionnées.
+        const tags = screenedTags[item.id] || [];
+        if (!tags.some(tag => tagFilters.includes(tag.id))) return false;
+      }
       if (!q) return true;
       return `${item.home?.name || ''} ${item.away?.name || ''} ${item.venue || ''} ${shortDate(item.dayKey)}`
         .toLowerCase()
         .includes(q);
     });
-  }, [monthFixtures, statusTab, search]);
+  }, [monthFixtures, statusTab, search, tagFilters, screenedTags]);
+
+  /** Nombre de rencontres scannées portant chaque étiquette. */
+  const tagCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const tags of Object.values(screenedTags)) {
+      for (const tag of tags) {
+        counts[tag.id] = (counts[tag.id] || 0) + 1;
+      }
+    }
+    return counts;
+  }, [screenedTags]);
+
+  const scannedCount = Object.keys(screenedTags).length;
+
+  const toggleTagFilter = (id: MatchTagId) => {
+    setTagFilters(prev => (prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]));
+  };
 
   // Regroupement par journée pour les en-têtes de section
   const groupedDays = useMemo(() => {
@@ -376,6 +409,7 @@ export default function Home() {
     setScreening(true);
     try {
       const next: Record<string, any> = {};
+      const nextTags: Record<string, MatchTag[]> = {};
       for (let i = 0; i < dayKeys.length; i += 4) {
         const batch = dayKeys.slice(i, i + 4);
         await Promise.all(
@@ -385,10 +419,16 @@ export default function Home() {
             const payload = await response.json();
             (payload.matches || []).forEach((match: any) => {
               if (match.vigilance) next[match.id] = match.vigilance;
+              // Les étiquettes sont produites par le moteur : le front
+              // ne fait que les afficher (aucun calcul ici).
+              if (Array.isArray(match.tags) && match.tags.length) {
+                nextTags[match.id] = match.tags as MatchTag[];
+              }
             });
           })
         );
         setScreenedScores(prev => ({ ...prev, ...next }));
+        setScreenedTags(prev => ({ ...prev, ...nextTags }));
       }
     } catch {
       setCalendarError('Le scan de vigilance n’a pas abouti. Réessayez.');
@@ -581,6 +621,49 @@ export default function Home() {
           </button>
         </div>
 
+        {/* Filtres d'étiquettes : ils ne servent qu'après un scan, car les
+            étiquettes sont produites par le moteur lors de l'analyse. */}
+        {monthFixtures.length > 0 && (
+          <div className="tagFilterBar" role="group" aria-label="Filtrer les rencontres par étiquette">
+            <span className="tagFilterLabel">ÉTIQUETTES</span>
+            {MATCH_TAG_CONFIG.order.map(id => {
+              const meta = MATCH_TAG_LABELS[id];
+              const count = tagCounts[id] || 0;
+              const active = tagFilters.includes(id);
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className={`tagFilterButton ${active ? 'tagFilterActive' : ''} ${count === 0 ? 'tagFilterEmpty' : ''}`}
+                  onClick={() => toggleTagFilter(id)}
+                  aria-pressed={active}
+                  disabled={count === 0 && !active}
+                  title={
+                    count === 0
+                      ? "Aucune rencontre scannée ne porte cette étiquette."
+                      : `${count} rencontre(s) scannée(s) portent cette étiquette.`
+                  }
+                >
+                  <i aria-hidden="true">{meta.emoji}</i>
+                  {meta.label}
+                  <b>{count}</b>
+                </button>
+              );
+            })}
+            {tagFilters.length > 0 && (
+              <button type="button" className="tagFilterReset" onClick={() => setTagFilters([])}>
+                Réinitialiser
+              </button>
+            )}
+            {scannedCount === 0 && (
+              <small className="tagFilterHint">
+                Lancez le scan du mois pour classer les rencontres : les étiquettes sont calculées par le
+                moteur au moment de l’analyse.
+              </small>
+            )}
+          </div>
+        )}
+
         {monthFixtures.length > 0 ? (
           <>
             {visibleFixtures.length > 0 ? (
@@ -602,6 +685,7 @@ export default function Home() {
                             onOpen={handleOpenMatch}
                             highlighted={lastMatchId === item.id}
                             vigilance={screenedScores[item.id]}
+                            tags={screenedTags[item.id]}
                           />
                         </div>
                       ))}
