@@ -50,6 +50,7 @@ import {
   calibratedConfidence,
   probabilityInterval,
   valueAssessment,
+  type CalibrationParams,
 } from '../app/lib/calibration.ts';
 import { DEFAULT_CALIBRATION } from '../app/lib/calibrationParams.ts';
 import { runQuantitativeAnalyst, shrunkMean, shrunkRatio } from '../app/lib/analystEngine.ts';
@@ -424,10 +425,26 @@ console.log('7. Calibration');
   const interval = probabilityInterval(DEFAULT_CALIBRATION, 0.55);
   check('intervalle de crédibilité valide', interval.low < 0.55 && interval.high > 0.55, JSON.stringify(interval));
 
-  const below = valueAssessment(0.01, DEFAULT_CALIBRATION);
-  const above = valueAssessment(DEFAULT_CALIBRATION.valueThreshold + 0.01, DEFAULT_CALIBRATION);
+  // Le seuil de valeur est testé sur une configuration EXPLICITE : la
+  // calibration versionnée peut avoir un seuil non démontré, auquel cas
+  // la détection de valeur doit rester inactive.
+  const demonstrated: CalibrationParams = {
+    ...DEFAULT_CALIBRATION,
+    valueThreshold: 0.02,
+    valueThresholdDemonstrated: true,
+  };
+  const below = valueAssessment(0.01, demonstrated);
+  const above = valueAssessment(demonstrated.valueThreshold + 0.01, demonstrated);
   check('seuil de valeur : en deçà = pas de valeur', !below.isValue);
   check('seuil de valeur : au-delà = valeur', above.isValue);
+  check(
+    'seuil de valeur : aucun écart sans seuil démontré',
+    !valueAssessment(0.5, { ...DEFAULT_CALIBRATION, valueThresholdDemonstrated: false }).isValue
+  );
+  check(
+    'seuil de valeur : bruit de calcul ignoré',
+    !valueAssessment(1e-12, demonstrated).isValue
+  );
 }
 
 console.log('8. Garde-fous du moteur');

@@ -69,7 +69,7 @@ import {
 } from './analystEngine';
 import { credibleInterval, poissonPmf } from './poissonModels';
 import type { CalibrationParams, CalibrationMetrics, ConfidenceBin, OutcomeProbs } from './calibration';
-import { applyCalibration } from './calibration';
+import { applyCalibration, MIN_MEANINGFUL_EDGE } from './calibration';
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -358,8 +358,12 @@ function buildLeagueWalkForward(
   const inputs: AnalystInput[] = [];
   const naive: OutcomeProbs[] = [];
 
-  const historyFor = (id: number) =>
-    matches.filter(m => m.homeId === id || m.awayId === id);
+  // Historique d'une équipe RESTREINT aux rencontres déjà jouées.
+  // Cette liste ne doit contenir que les matchs antérieurs à la rencontre
+  // en cours de rejeu : prendre toute la saison revenait à laisser entrer
+  // dans le modèle des matchs postérieurs (fuite temporelle).
+  const historyFor = (id: number, prior: BacktestMatch[]) =>
+    prior.filter(m => m.homeId === id || m.awayId === id);
 
   for (let i = 0; i < matches.length; i++) {
     const match = matches[i];
@@ -487,8 +491,13 @@ function buildLeagueWalkForward(
     // référence qui les contient déjà.
     const naiveProbs = poissonOutcomeProbs(leagueHomeGoals, leagueAwayGoals);
 
+    // Forme récente : uniquement des matchs ANTERIEURS à la rencontre.
+    // On écarte aussi les matchs du même jour : l'heure de coup d'envoi
+    // n'est pas connue dans le jeu de données, donc leur ordre par
+    // rapport à la rencontre prédite n'est pas garanti.
     const recentFor = (id: number) =>
-      historyFor(id)
+      historyFor(id, history)
+        .filter(m => m.date < match.date)
         .slice()
         .sort((a, b) => a.date.localeCompare(b.date))
         .slice(-6)
@@ -870,9 +879,13 @@ export function evaluateSamples(
   const edgeBuckets = computeEdgeBuckets(samples, modelWeight, sharpness);
   const derived = deriveValueThreshold(samples, modelWeight, sharpness);
   const valueThreshold = calibrationOverride?.valueThreshold ?? derived.threshold;
+  // Le seuil n'est « démontré » que si l'ajustement a trouvé un seuil dont
+  // le ROI cumulé est positif sur l'historique. Sinon la détection de
+  // valeur reste inactive (voir valueAssessment).
+  const valueThresholdDemonstrated = derived.demonstrated;
   if (!derived.demonstrated) {
     notes.push(
-      `Aucun seuil d\'edge ne démontre un ROI positif sur cet échantillon (${derived.bets} pari(s) à edge positif, ROI ${((derived.roi ?? 0) * 100).toFixed(1)} %). Le seuil de valeur retenu est le seuil minimal : le signal « valeur » n\'est PAS validé empiriquement.`
+      `Aucun seuil d\'edge ne démontre un ROI positif sur cet échantillon (${derived.bets} pari(s) à edge positif, ROI ${((derived.roi ?? 0) * 100).toFixed(1)} %). Le signal « valeur » reste INACTIF : il n\'est pas validé empiriquement.`
     );
   }
 
@@ -962,10 +975,11 @@ export function evaluateSamples(
   }
 
   const params: CalibrationParams = {
-    version: '3.0',
+    version: '3.1',
     modelWeight: Number(modelWeight.toFixed(4)),
     sharpness: Number(sharpness.toFixed(4)),
     valueThreshold: Number(valueThreshold.toFixed(4)),
+    valueThresholdDemonstrated,
     effectiveSampleSize: Number(effectiveSampleSize.toFixed(2)),
     logistic,
     confidenceBins,
@@ -1090,7 +1104,12 @@ function computeValueRoi(
       { index: 2, edge: calibrated.away - sample.market.away, odds: sample.odds.away },
     ];
     const best = picks.sort((a, b) => b.edge - a.edge)[0];
-    if (best.edge < threshold) continue;
+    // Même définition d'un « pari » que la production (valueAssessment) :
+    // un écart strictement positif ET au-dessus du seuil. Sans cette
+    // contrainte, un écart nul (mélange = marché) comptait comme un pari
+    // et le ROI mesuré était celui de la marge du bookmaker, pas celui
+    // d'une stratégie de valeur.
+    if (!(best.edge > MIN_MEANINGFUL_EDGE) || best.edge < threshold) continue;
     bets += 1;
     returns += best.index === sample.outcome ? best.odds - 1 : -1;
   }

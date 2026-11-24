@@ -12,3 +12,6 @@ dist/
 # Bytecodes Python (artefacts de compilation, non versionnés)
 __pycache__/
 *.py[cod]
+
+# Scripts d'audit temporaires (mesures avant/après, non versionnés)
+.audit/

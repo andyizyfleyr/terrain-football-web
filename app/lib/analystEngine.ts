@@ -2123,6 +2123,13 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
     const assessment = valueAssessment(best.edge, calibration);
     if (assessment.isValue) {
       value = { pick: best.key, label: `Valeur détectée : ${best.label}`, edge: round(best.edge, 4) };
+    } else if (calibration.valueThresholdDemonstrated === false) {
+      value = {
+        pick: '',
+        label:
+          'Aucune valeur annoncée : aucun seuil de valeur n’a été démontré sur l’historique de référence.',
+        edge: 0,
+      };
     } else if (best.edge <= -calibration.valueThreshold) {
       value = { pick: best.key, label: `Le marché est plus optimiste que le modèle (${best.label})`, edge: round(best.edge, 4) };
     }
@@ -2270,7 +2277,19 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
   ].sort((a, b) => b.p - a.p);
   const separation = clamp((simRanked[0].p - simRanked[1].p) / 0.3, 0, 1);
   const maxEdge = market ? Math.max(Math.abs(edges.home), Math.abs(edges.draw), Math.abs(edges.away)) : 0;
-  const agreement = clamp(1 - maxEdge / 0.15, 0, 1);
+  // « Accord du modèle avec le marché » : on mesure l'écart entre le
+  // MODÈLE (probabilités pures) et le marché, pas l'écart du mélange
+  // calibré. Sinon la feature devient constante quand le poids du modèle
+  // est nul (le mélange redevient le marché) et l'accord cesse d'apporter
+  // aucune information à la confiance.
+  const modelMaxEdge = market
+    ? Math.max(
+        Math.abs(pureModel.home - devigged.home),
+        Math.abs(pureModel.draw - devigged.draw),
+        Math.abs(pureModel.away - devigged.away)
+      )
+    : 0;
+  const agreement = clamp(1 - modelMaxEdge / 0.15, 0, 1);
   const confidenceScore = Math.round(100 * (0.5 * separation + 0.32 * completeness + 0.18 * agreement));
 
   // La confiance affichée n'est plus un score arbitraire : c'est la

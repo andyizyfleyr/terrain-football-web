@@ -69,6 +69,13 @@ export type CalibrationParams = {
   sharpness: number;
   /** Écart minimal (points de probabilité) pour parler de « valeur ». */
   valueThreshold: number;
+  /**
+   * true si l'ajustement a démontré un seuil de valeur rentable sur
+   * l'historique. Quand c'est false, aucun seuil n'a été démontré : la
+   * détection de valeur doit rester DORMANTE plutôt que de déclarer
+   * « valeur » tous les paris dont l'écart est strictement positif.
+   */
+  valueThresholdDemonstrated?: boolean;
   /** Concentration Beta effective pour les intervalles de crédibilité. */
   effectiveSampleSize: number;
   /**
@@ -86,6 +93,14 @@ export type CalibrationParams = {
 };
 
 export type OutcomeProbs = { home: number; draw: number; away: number };
+
+/**
+ * Écart minimal considéré comme significatif. En dessous, l'écart n'est
+ * que du bruit de calcul en virgule flottante : sans cette garde, un
+ * mélange dont le poids de modèle est nul produit des écarts de l'ordre
+ * de 1e-16, qui suffisent à faire passer une rencontre pour un « pari ».
+ */
+export const MIN_MEANINGFUL_EDGE = 1e-6;
 
 /** Mélange convexe modèle / marché. */
 export function blendProbabilities(
@@ -170,7 +185,16 @@ export function valueAssessment(
   params: CalibrationParams
 ): { isValue: boolean; threshold: number; note: string } {
   const threshold = params.valueThreshold;
-  if (!Number.isFinite(edge) || edge <= 0) {
+  if (params.valueThresholdDemonstrated === false) {
+    return {
+      isValue: false,
+      threshold,
+      note:
+        'Aucun seuil de valeur n’a été démontré sur l’historique de référence : ' +
+        'la détection de valeur reste inactive tant que le seuil n’est pas établi.',
+    };
+  }
+  if (!Number.isFinite(edge) || edge <= MIN_MEANINGFUL_EDGE) {
     return { isValue: false, threshold, note: 'Aucun écart positif significatif.' };
   }
   const isValue = edge >= threshold;
