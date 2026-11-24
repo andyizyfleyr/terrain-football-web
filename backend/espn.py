@@ -56,6 +56,11 @@ DAY_CACHE: Dict[str, Dict[str, Any]] = {}
 
 # Catalogue des competitions exposees au front (calendrier). Le slug est
 # l'identifiant ESPN utilise par le scoreboard et les calendriers d'equipe.
+#
+# Le slug DOIT etre celui publie par ESPN : interroger un slug inconnu
+# renvoie HTTP 400 et vide silencieusement le calendrier (aucun match,
+# aucune erreur visible). Les slugs ci-dessous ont donc ete releves sur
+# `site.api.espn.com` et valides un par un.
 LEAGUE_CATALOG: List[Dict[str, Any]] = [
     {"slug": "eng.1", "name": "Premier League", "country": "Angleterre", "tier": 1},
     {"slug": "eng.2", "name": "Championship", "country": "Angleterre", "tier": 2},
@@ -68,12 +73,31 @@ LEAGUE_CATALOG: List[Dict[str, Any]] = [
     {"slug": "ned.1", "name": "Eredivisie", "country": "Pays-Bas", "tier": 1},
     {"slug": "por.1", "name": "Liga Portugal", "country": "Portugal", "tier": 1},
     {"slug": "bel.1", "name": "Pro League", "country": "Belgique", "tier": 1},
-    {"slug": "deu.1", "name": "Bundesliga", "country": "Allemagne", "tier": 1},
+    {"slug": "ger.1", "name": "Bundesliga", "country": "Allemagne", "tier": 1},
     {"slug": "sco.1", "name": "Scottish Premiership", "country": "Ecosse", "tier": 1},
     {"slug": "tur.1", "name": "Super Lig", "country": "Turquie", "tier": 1},
     {"slug": "mex.1", "name": "Liga MX", "country": "Mexique", "tier": 1},
     {"slug": "usa.1", "name": "MLS", "country": "Etats-Unis", "tier": 1},
 ]
+
+# Slugs historiques acceptes en entree, reecrits vers le slug ESPN
+# courant. `deu.1` (code ISO de l'Allemagne) a longtemps ete catalogue
+# alors qu'ESPN n'expose que `ger.1` : la Bundesliga renvoyait donc une
+# erreur 400 et son calendrier restait vide. On garde l'alias pour que
+# les liens et URL deja.partages continuent de fonctionner.
+ESPN_LEAGUE_ALIASES: Dict[str, str] = {
+    "deu.1": "ger.1",
+}
+
+
+def resolve_league_slug(league: str) -> str:
+    """Slug ESPN effectif associe a un slug demande.
+
+    Renvoie le slug tel quel s'il est inconnu : ESPN repondra par une
+    erreur explicite plutot que par un resultat vide trompeur.
+    """
+    raw = (league or "").strip()
+    return ESPN_LEAGUE_ALIASES.get(raw, raw)
 
 
 def _semaphore() -> asyncio.Semaphore:
@@ -214,6 +238,7 @@ async def fetch_day_matches(
     client: httpx.AsyncClient, league: str, date_compact: str
 ) -> List[Dict[str, Any]]:
     """Matchs d'une journée (scoreboard ESPN)."""
+    league = resolve_league_slug(league)
     url = f"{ESPN_BASE}/site/v2/sports/soccer/{league}/scoreboard?dates={date_compact}"
     payload = await fetch_json(client, url)
     if not payload:
@@ -260,6 +285,7 @@ async def fetch_day_fixtures(
     cache, ESPN recevrait une trentaine de scoreboards d'affilee. Le cache
     est court (5 min) car les scores changent pendant la journee.
     """
+    league = resolve_league_slug(league)
     key = f"{league}:{date_compact}"
     cached = DAY_CACHE.get(key)
     if cached and (time.time() - cached["at"]) < DAY_CACHE_TTL:
@@ -337,6 +363,7 @@ async def fetch_league_season(
     (reponse trop lourde ou refusee) : la charge reseau reste la meme
     pour toute la journee.
     """
+    league = resolve_league_slug(league)
     key = f"{league}:{year}"
     cached = SEASON_CACHE.get(key)
     now = time.time()
@@ -369,6 +396,7 @@ async def fetch_team_schedule(
     (reponse lourde ou refusee), repli sur le scoreboard de la saison,
     filtré sur l'equipe concernee.
     """
+    league = resolve_league_slug(league)
     if not team_id:
         return []
 
@@ -610,6 +638,7 @@ def _fraicheur(
 async def fetch_standings(
     client: httpx.AsyncClient, league: str
 ) -> Dict[str, Dict[str, Any]]:
+    league = resolve_league_slug(league)
     url = f"{ESPN_BASE}/v2/sports/soccer/{league}/standings"
     payload = await fetch_json(client, url)
     table: Dict[str, Dict[str, Any]] = {}
@@ -689,6 +718,7 @@ async def fetch_style_averages(
     """Moyenne du style de jeu sur les N derniers matchs terminés."""
     if not matches:
         return None
+    league = resolve_league_slug(league)
     sample = matches[-STYLE_MATCHES:]
     totals: Dict[str, float] = {key: 0.0 for key in STYLE_FIELDS.values()}
     counted = 0

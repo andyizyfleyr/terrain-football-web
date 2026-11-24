@@ -352,6 +352,51 @@ async def run_retry_exhausted():
 result, calls = asyncio.run(run_retry_exhausted())
 check("abandon après épuisement des tentatives", result is None and calls == 3, f"{result} / {calls} appels")
 
+print("7. Slug ESPN réellement demandé à l'API")
+
+
+async def capture_url(league: str):
+    """Note l'URL ESPN réellement appelée pour un slug donné."""
+    seen: List[str] = []
+
+    async def fake_fetch(client, url, **kwargs):
+        seen.append(url)
+        return {"events": []}
+
+    espn_module.fetch_json = fake_fetch
+    espn_module.DAY_CACHE.clear()
+    await espn_module.fetch_day_matches(None, league, "20261122")
+    espn_module.fetch_json = original_fetch
+    espn_module.DAY_CACHE.clear()
+    return seen
+
+
+seen = asyncio.run(capture_url("deu.1"))
+check(
+    "l'alias `deu.1` demande bien la Bundesliga ESPN (`ger.1`)",
+    bool(seen) and "/soccer/ger.1/" in seen[0],
+    str(seen),
+)
+check(
+    "aucune URL ESPN ne contient le slug invalide `deu.1`",
+    all("/soccer/deu.1/" not in url for url in seen),
+    str(seen),
+)
+
+seen = asyncio.run(capture_url("ger.1"))
+check(
+    "le slug `ger.1` demande la Bundesliga ESPN",
+    bool(seen) and "/soccer/ger.1/" in seen[0],
+    str(seen),
+)
+
+seen = asyncio.run(capture_url("eng.1"))
+check(
+    "un slug valide n'est pas altéré",
+    bool(seen) and "/soccer/eng.1/" in seen[0],
+    str(seen),
+)
+
 print("")
 if failures:
     print(f"✗ {len(failures)} contrôle(s) en échec : {failures}")

@@ -236,6 +236,58 @@ check("régression nommée", "forme domicile non vide" in smoke_broken.json().ge
 api.fetch_day_fixtures = espn_module.fetch_day_fixtures
 api.build_base_matches = original_build
 
+print("8. Slugs de championnat (résolution ESPN)")
+
+# Régression corrigée : le catalogue exposait `deu.1`, slug inconnu d'ESPN
+# (qui ne publie que `ger.1`). ESPN répondait HTTP 400 et le calendrier
+# de la Bundesliga restait vide, sans aucune erreur visible.
+catalog_slugs = [l["slug"] for l in espn_module.LEAGUE_CATALOG]
+check(
+    "Bundesliga au catalogue sous son slug ESPN",
+    "ger.1" in catalog_slugs,
+    str(catalog_slugs),
+)
+check(
+    "aucun slug ISO non ESPN au catalogue",
+    "deu.1" not in catalog_slugs,
+    str(catalog_slugs),
+)
+check(
+    "alias historique `deu.1` conservé",
+    espn_module.resolve_league_slug("deu.1") == "ger.1",
+    espn_module.resolve_league_slug("deu.1"),
+)
+check(
+    "slug ESPN inchangé par la résolution",
+    espn_module.resolve_league_slug("ger.1") == "ger.1",
+    espn_module.resolve_league_slug("ger.1"),
+)
+check(
+    "slug inconnu conservé tel quel",
+    espn_module.resolve_league_slug("xyz.9") == "xyz.9",
+    espn_module.resolve_league_slug("xyz.9"),
+)
+check(
+    "les 16 compétitions restent cataloguées",
+    len(catalog_slugs) == 16,
+    str(len(catalog_slugs)),
+)
+
+# Chaque slug catalogué doit produire une URL ESPN distincte : une
+# collision signerait qu'une Division est interrogee sous le nom d'une
+# autre (le symptôme observé sur Serie A / Ligue 1).
+resolved = {s: espn_module.resolve_league_slug(s) for s in catalog_slugs}
+check(
+    "aucune collision de résolution entre compétitions",
+    len(set(resolved.values())) == len(resolved),
+    str(resolved),
+)
+check(
+    "les slugs résolus pointent tous vers ESPN",
+    all(v in resolved.values() for v in resolved.values()),
+    str(resolved),
+)
+
 print("")
 if failures:
     print(f"✗ {len(failures)} contrôle(s) en échec : {failures}")

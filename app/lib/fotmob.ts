@@ -32,16 +32,35 @@ const FOTMOB_HEADERS: Record<string, string> = {
   'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
 };
 
-// Correspondance ligues ESPN -> FotMob primaryId / id
+/**
+ * Correspondance slug de championnat (convention ESPN) -> identifiants
+ * de ligue FotMob.
+ *
+ * Chaque identifiant est releve sur la source elle-meme :
+ * `GET https://www.fotmob.com/api/data/leagues?id=<id>` publie `details.id`,
+ * `details.name` et `details.country`. Le premier identifiant de chaque
+ * liste est le `primaryId` (la ligue mere) ; les suivants sont les
+ * competitions filles (playoffs, qualifications) qui portent des
+ * matchs dans la meme division et doivent donc etre reconnues comme
+ * telles lors du rapprochement ESPN <-> FotMob.
+ *
+ * Avertissement : ces identifiants ne se devinent pas. Confondre la
+ * Serie A (55) et la Ligue 1 (53), ou le MLS (130) et la Liga Portugal
+ * (61), fait apparaitre les matchs d'une Division dans une autre.
+ */
 export const ESPN_TO_FOTMOB_LEAGUE: Record<string, number[]> = {
   'eng.1': [47],
+  'eng.2': [48],
   'esp.1': [87],
+  'esp.2': [140],
   'ita.1': [55],
-  'ger.1': [54],
+  'ita.2': [86],
   'fra.1': [53],
+  'fra.2': [110],
   'ned.1': [57],
   'por.1': [61],
   'bel.1': [40, 41],
+  'ger.1': [54],
   'sco.1': [64, 181],
   'tur.1': [71],
   'uefa.champions': [42, 10611],

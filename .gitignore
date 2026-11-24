@@ -8,3 +8,7 @@ dist/
 
 # Captures de la refonte (artefacts locaux, non versionnés)
 .captures/
+
+# Bytecodes Python (artefacts de compilation, non versionnés)
+__pycache__/
+*.py[cod]

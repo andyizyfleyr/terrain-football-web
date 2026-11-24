@@ -38,10 +38,12 @@ import { analyseSequences, extractPollFacts, sequenceAttackAdjustment } from '..
 import { buildRefereeProfile } from '../app/lib/refereeProfile.ts';
 import { buildPitchProfile } from '../app/lib/pitchProfile.ts';
 import {
+  LEAGUE_SLUG_BY_FOTMOB_ID,
   readLeagueIdentity,
   readMatchLeagueSlug,
   resolveLeagueSlug,
 } from '../app/lib/leagueIdentity.ts';
+import { ESPN_TO_FOTMOB_LEAGUE } from '../app/lib/fotmob.ts';
 import {
   applyCalibration,
   blendProbabilities,
@@ -705,6 +707,87 @@ console.log('10. Identité de championnat (collecte)');
     'ligue : identifiant inconnu conservé de façon lisible',
     resolveLeagueSlug({ fotmobId: 999 }) === 'league-999',
     resolveLeagueSlug({ fotmobId: 999 })
+  );
+
+  // --- Cohérence croisée des deux tables de correspondance ---------------
+  // Régression corrigée : `leagueIdentity.ts` inversait plusieurs ligues
+  // (Serie A et Ligue 1, MLS et Liga Portugal). Deux tables de
+  // correspondance qui se contredisent produisent un jeu de données FAUX
+  // : les matchs d'une Division sont rangés dans une autre et le
+  // calibrage du backtest est regroupé sur des bases incohérentes.
+  //
+  // On exige donc que, pour chaque ligue, l'identifiant FotMob déclaré
+  // dans les deux tables désigne la MÊME compétition.
+  const conflicting: string[] = [];
+  for (const [slug, ids] of Object.entries(ESPN_TO_FOTMOB_LEAGUE)) {
+    for (const id of ids) {
+      const fromIdentity = LEAGUE_SLUG_BY_FOTMOB_ID[id];
+      // Un identifiant secondaire (playoffs, qualifications) n'est pas
+      // nécessairement dans la table d'identité : seul le primaryId
+      // doit y figurer.
+      if (fromIdentity && fromIdentity !== slug) {
+        conflicting.push(`${id}: ${slug} vs ${fromIdentity}`);
+      }
+    }
+  }
+  check(
+    'ligue : les deux tables de correspondance ne se contredisent pas',
+    conflicting.length === 0,
+    conflicting.join(', ')
+  );
+
+  // Chaque identifiant primaire doit se retrouver dans les deux tables.
+  const orphans: string[] = [];
+  for (const [slug, ids] of Object.entries(ESPN_TO_FOTMOB_LEAGUE)) {
+    if (!LEAGUE_SLUG_BY_FOTMOB_ID[ids[0]]) orphans.push(`${slug} → ${ids[0]}`);
+  }
+  check(
+    'ligue : chaque primaire FotMob est connu de la table d’identité',
+    orphans.length === 0,
+    orphans.join(', ')
+  );
+
+  // Identifiants de référence relevés sur la source (leagues?id=N).
+  const referenceIds: Record<string, number> = {
+    'eng.1': 47,
+    'eng.2': 48,
+    'esp.1': 87,
+    'esp.2': 140,
+    'ita.1': 55,
+    'ita.2': 86,
+    'fra.1': 53,
+    'fra.2': 110,
+    'ned.1': 57,
+    'por.1': 61,
+    'bel.1': 40,
+    'ger.1': 54,
+    'sco.1': 64,
+    'tur.1': 71,
+    'mex.1': 230,
+    'usa.1': 130,
+  };
+  const wrongIds: string[] = [];
+  for (const [slug, expected] of Object.entries(referenceIds)) {
+    const actual = ESPN_TO_FOTMOB_LEAGUE[slug]?.[0];
+    if (actual !== expected) wrongIds.push(`${slug}: ${actual} ≠ ${expected}`);
+  }
+  check(
+    'ligue : identifiants FotMob conformes à la source',
+    wrongIds.length === 0,
+    wrongIds.join(', ')
+  );
+
+  // La Bundesliga doit rester identifiée comme telle (le slug ESPN est
+  // `ger.1`, pas le code ISO `deu.1`).
+  check(
+    'ligue : Bundesliga identifiée par son slug ESPN',
+    resolveLeagueSlug({ fotmobId: 54, name: 'Bundesliga', country: 'GER' }) === 'ger.1',
+    resolveLeagueSlug({ fotmobId: 54, name: 'Bundesliga', country: 'GER' })
+  );
+  check(
+    'ligue : Bundesliga résolue par son nom',
+    resolveLeagueSlug({ name: 'Bundesliga' }) === 'ger.1',
+    resolveLeagueSlug({ name: 'Bundesliga' })
   );
 }
 

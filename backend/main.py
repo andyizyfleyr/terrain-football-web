@@ -208,7 +208,13 @@ async def health() -> JSONResponse:
 @app.get("/api/debug/espn")
 async def debug_espn(league: str = "eng.1", team: str = "306") -> JSONResponse:
     """Diagnostic temporaire de l'accès ESPN (statut, taille, structure)."""
-    from espn import ESPN_BASE, _client
+    from espn import ESPN_BASE, _client, resolve_league_slug
+
+    # Le diagnostic interroge ESPN en direct : il doit donc viser le
+    # slug ESPN effectif, sinon il rapporte une erreur 400 pour un
+    # simple alias de nom (ex. `deu.1` -> `ger.1`) et masque la
+    # reelle cause d'un calendrier vide.
+    league = resolve_league_slug(league)
 
     report = {}
     # Le client doit rester ouvert jusqu'a la sonde du calendrier d'equipe :

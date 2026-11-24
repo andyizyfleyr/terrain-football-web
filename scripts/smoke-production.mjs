@@ -132,6 +132,48 @@ console.log('3. Catalogue des compétitions');
   check('catalogue servi', res.ok && leagues.length >= 10, `${leagues.length} compétitions`);
   check('Premier League présente', leagues.some((l) => l.slug === 'eng.1'), '');
   check('LaLiga présente', leagues.some((l) => l.slug === 'esp.1'), '');
+  check(
+    'Bundesliga présente sous son slug ESPN',
+    leagues.some((l) => l.slug === 'ger.1'),
+    leagues.map((l) => l.slug).join(',')
+  );
+}
+
+console.log('');
+console.log('3b. Couverture de chaque compétition cataloguée');
+{
+  // Régression corrigée : la Bundesliga était cataloguée sous le slug
+  // `deu.1`, inconnu d'ESPN (qui ne publie que `ger.1`). ESPN répondait
+  // HTTP 400 et le calendrier restait vide — sans aucune erreur visible.
+  //
+  // On vérifie donc que TOUTE compétition annoncée sert un calendrier :
+  // un slug ESPN invalide se voit immédiatement.
+  const res = await getJson(`${API_BASE}/api/leagues`);
+  const leagues = res.body?.leagues || [];
+  const today = new Date();
+
+  // Fenêtre de 14 jours : couvre au moins une journée de jeu pour chaque
+  // Division, y compris les calendriers à décalage horaire (MLS, Liga MX).
+  const dates = [];
+  for (let back = 0; back <= 14; back += 1) dates.push(compact(shiftDays(today, -back)));
+
+  const empty = [];
+  for (const league of leagues) {
+    let served = false;
+    for (const date of dates) {
+      const day = await getJson(`${API_BASE}/api/fixtures?league=${league.slug}&date=${date}`);
+      if (day.ok && (day.body?.events || []).length) {
+        served = true;
+        break;
+      }
+    }
+    if (!served) empty.push(league.slug);
+  }
+  check(
+    'toutes les compétitions cataloguées servent un calendrier',
+    empty.length === 0,
+    `sans match sur 14 jours : ${empty.join(', ')}`
+  );
 }
 
 console.log('');
