@@ -11,20 +11,49 @@ export const todayKey = () => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 export const keyFor = (year: number, month: number, day: number) => `${year}-${pad(month)}-${pad(day)}`;
-export const monthLabel = (value: string) =>
-  new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(new Date(`${value}-01T12:00:00`));
-export const longDate = (value: string) =>
-  value
-    ? new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(
-        new Date(`${value}T12:00:00`)
-      )
+/**
+ * Normalise une cle de jour : `2026-11-22` comme `20261122`.
+ * Sans cette normalisation, `new Date('20261122T12:00:00')` est une date
+ * invalide et `Intl.DateTimeFormat.format()` leve une RangeError — ce qui
+ * faisait tomber la page entiere sur une URL de date compacte.
+ */
+export function parseDayKey(value: string): Date | null {
+  if (!value) return null;
+  const digits = value.replace(/\D/g, '');
+  let iso = '';
+  if (digits.length === 8) {
+    iso = `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+  } else if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    iso = value;
+  }
+  if (!iso) return null;
+  const parsed = new Date(`${iso}T12:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+export const monthLabel = (value: string) => {
+  const parsed = parseDayKey(`${value}-01`);
+  return parsed ? new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(parsed) : '';
+};
+export const longDate = (value: string) => {
+  const parsed = parseDayKey(value);
+  return parsed
+    ? new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(parsed)
     : '';
-export const shortDate = (value: string) =>
-  value ? new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${value}T12:00:00`)) : '';
-export const dayHeading = (value: string) =>
-  value ? new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(`${value}T12:00:00`)) : '';
-export const dayHeadingShort = (value: string) =>
-  value ? new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${value}T12:00:00`)) : '';
+};
+export const shortDate = (value: string) => {
+  const parsed = parseDayKey(value);
+  return parsed ? new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }).format(parsed) : '';
+};
+export const dayHeading = (value: string) => {
+  const parsed = parseDayKey(value);
+  return parsed ? new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }).format(parsed) : '';
+};
+export const dayHeadingShort = (value: string) => {
+  const parsed = parseDayKey(value);
+  return parsed ? new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }).format(parsed) : '';
+};
+
 export const timeOf = (value: string) =>
   value
     ? new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Porto-Novo' }).format(new Date(value))

@@ -51,6 +51,7 @@ import {
 } from '../app/lib/calibration.ts';
 import { DEFAULT_CALIBRATION } from '../app/lib/calibrationParams.ts';
 import { runQuantitativeAnalyst, shrunkMean, shrunkRatio } from '../app/lib/analystEngine.ts';
+import { longDate, parseDayKey } from '../app/lib/terrain.ts';
 
 let failures = 0;
 function check(label: string, condition: boolean, detail?: string) {
@@ -705,6 +706,17 @@ console.log('10. Identité de championnat (collecte)');
     resolveLeagueSlug({ fotmobId: 999 }) === 'league-999',
     resolveLeagueSlug({ fotmobId: 999 })
   );
+}
+
+// ---------------------------------------------------------------------------
+// DATES : une cle de jour compacte ne doit plus faire tomber la page
+// ---------------------------------------------------------------------------
+{
+  check('date : cle ISO acceptee', parseDayKey('2026-11-22') !== null);
+  check('date : cle compacte acceptee', parseDayKey('20261122') !== null);
+  check('date : cle compacte = cle ISO', longDate('20261122') === longDate('2026-11-22'));
+  check('date : cle invalide neutralisee', parseDayKey('pas-une-date') === null && longDate('pas-une-date') === '');
+  check('date : jour de la semaine en francais', longDate('2026-11-22').startsWith('dimanche'));
 }
 
 console.log('');
