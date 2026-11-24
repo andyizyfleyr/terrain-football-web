@@ -46,11 +46,34 @@ TIMEOUT = float(os.environ.get("ESPN_TIMEOUT", "12"))
 SLOW_TIMEOUT = float(os.environ.get("ESPN_SLOW_TIMEOUT", "30"))
 MAX_CONCURRENT = int(os.environ.get("ESPN_MAX_CONCURRENT", "4"))
 CACHE_TTL = float(os.environ.get("ESPN_CACHE_TTL", "600"))
+DAY_CACHE_TTL = float(os.environ.get("ESPN_DAY_CACHE_TTL", "300"))
 
 # Un semaphore par boucle d'evenements (une instance Vercel peut en
 # reutiliser plusieurs dans sa vie).
 _SEMAPHORES: Dict[Any, asyncio.Semaphore] = {}
 SCHEDULE_CACHE: Dict[str, Dict[str, Any]] = {}
+DAY_CACHE: Dict[str, Dict[str, Any]] = {}
+
+# Catalogue des competitions exposees au front (calendrier). Le slug est
+# l'identifiant ESPN utilise par le scoreboard et les calendriers d'equipe.
+LEAGUE_CATALOG: List[Dict[str, Any]] = [
+    {"slug": "eng.1", "name": "Premier League", "country": "Angleterre", "tier": 1},
+    {"slug": "eng.2", "name": "Championship", "country": "Angleterre", "tier": 2},
+    {"slug": "esp.1", "name": "LaLiga", "country": "Espagne", "tier": 1},
+    {"slug": "esp.2", "name": "LaLiga2", "country": "Espagne", "tier": 2},
+    {"slug": "ita.1", "name": "Serie A", "country": "Italie", "tier": 1},
+    {"slug": "ita.2", "name": "Serie B", "country": "Italie", "tier": 2},
+    {"slug": "fra.1", "name": "Ligue 1", "country": "France", "tier": 1},
+    {"slug": "fra.2", "name": "Ligue 2", "country": "France", "tier": 2},
+    {"slug": "ned.1", "name": "Eredivisie", "country": "Pays-Bas", "tier": 1},
+    {"slug": "por.1", "name": "Liga Portugal", "country": "Portugal", "tier": 1},
+    {"slug": "bel.1", "name": "Pro League", "country": "Belgique", "tier": 1},
+    {"slug": "deu.1", "name": "Bundesliga", "country": "Allemagne", "tier": 1},
+    {"slug": "sco.1", "name": "Scottish Premiership", "country": "Ecosse", "tier": 1},
+    {"slug": "tur.1", "name": "Super Lig", "country": "Turquie", "tier": 1},
+    {"slug": "mex.1", "name": "Liga MX", "country": "Mexique", "tier": 1},
+    {"slug": "usa.1", "name": "MLS", "country": "Etats-Unis", "tier": 1},
+]
 
 
 def _semaphore() -> asyncio.Semaphore:
@@ -228,6 +251,42 @@ async def fetch_day_matches(
 
 
 # --------------------------------------------------------------------------
+async def fetch_day_fixtures(
+    client: httpx.AsyncClient, league: str, date_compact: str
+) -> List[Dict[str, Any]]:
+    """Matchs d'une journee au format du front, avec cache court.
+
+    Le calendrier du front demande une journee par jour du mois : sans
+    cache, ESPN recevrait une trentaine de scoreboards d'affilee. Le cache
+    est court (5 min) car les scores changent pendant la journee.
+    """
+    key = f"{league}:{date_compact}"
+    cached = DAY_CACHE.get(key)
+    if cached and (time.time() - cached["at"]) < DAY_CACHE_TTL:
+        return cached["events"]
+
+    matches = await fetch_day_matches(client, league, date_compact)
+    events: List[Dict[str, Any]] = []
+    for match in matches:
+        home = match.get("home") or {}
+        away = match.get("away") or {}
+        events.append(
+            {
+                "id": match.get("id"),
+                "date": match.get("date"),
+                "name": f"{home.get('name', '')} - {away.get('name', '')}",
+                "league": league,
+                "home": home,
+                "away": away,
+                "venue": match.get("venue") or "",
+                "city": match.get("city") or "",
+                "completed": bool((match.get("status") or {}).get("completed")),
+            }
+        )
+    DAY_CACHE[key] = {"at": time.time(), "events": events}
+    return events
+
+
 # Forme récente (schedule d'équipe)
 # --------------------------------------------------------------------------
 

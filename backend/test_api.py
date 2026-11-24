@@ -131,6 +131,59 @@ check("santé : moteur référencé", "engine" in health, str(health))
 check("contrat : 16 marchés annoncés", meta["analysis"]["markets"] == 16, str(meta.get("analysis")))
 check("contrat : 10 000 simulations", meta["analysis"]["simulations"] == 10000, str(meta.get("analysis")))
 
+print("6. Calendrier du front (compétitions et journées)")
+import espn as espn_module  # noqa: E402
+
+DAY_EVENTS = [
+    {
+        "id": "401879234",
+        "date": "2026-11-22T14:00Z",
+        "league": "eng.1",
+        "home": {"id": "306", "name": "Hull City", "short": "HUL", "logo": "l.png", "score": 2},
+        "away": {"id": "331", "name": "Brighton", "short": "BHA", "logo": "l.png", "score": 0},
+        "venue": "The MKM Stadium",
+        "city": "Hull",
+        "status": {"completed": True},
+    }
+]
+
+original_fetch = espn_module.fetch_json
+
+
+async def fake_scoreboard(client, url, **kwargs):
+    return {"events": [{"id": "401879234", "date": "2026-11-22T14:00Z", "competitions": []}]}
+
+
+async def fake_day_matches(client, league, date_compact):
+    return list(DAY_EVENTS)
+
+
+espn_module.fetch_day_matches = fake_day_matches
+espn_module.DAY_CACHE.clear()
+with TestClient(api.app) as client:
+    leagues_payload = client.get("/api/leagues").json()
+    fixtures_payload = client.get("/api/fixtures?league=eng.1&date=2026-11-22").json()
+espn_module.fetch_day_matches = espn_module.fetch_day_matches
+espn_module.DAY_CACHE.clear()
+
+catalog = leagues_payload.get("leagues", [])
+check(
+    "catalogue des compétitions exposé",
+    len(catalog) >= 10 and all({"slug", "name", "country"} <= set(l) for l in catalog),
+    str(catalog[:2]),
+)
+check("Premier League au catalogue", any(l["slug"] == "eng.1" for l in catalog), str(catalog[:2]))
+events = fixtures_payload.get("events", [])
+check("journée servie", len(events) == 1, str(fixtures_payload)[:200])
+check(
+    "fixture au format du front",
+    bool(events)
+    and {"id", "date", "name", "home", "away"} <= set(events[0])
+    and events[0]["home"].get("short") == "HUL"
+    and events[0]["away"].get("name") == "Brighton",
+    str(events[:1]),
+)
+
 print("")
 if failures:
     print(f"✗ {len(failures)} contrôle(s) en échec : {failures}")

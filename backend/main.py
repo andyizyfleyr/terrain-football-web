@@ -40,7 +40,14 @@ from fastapi.responses import JSONResponse
 # par le runtime (uvicorn, `python backend/main.py`, tests).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from espn import build_base_matches, compact_date, parse_iso  # noqa: E402
+from espn import (  # noqa: E402
+    LEAGUE_CATALOG,
+    _client,
+    build_base_matches,
+    compact_date,
+    fetch_day_fixtures,
+    parse_iso,
+)
 
 ENGINE_URL = (os.environ.get("ENGINE_URL") or "https://terrain-football-web.vercel.app").rstrip("/")
 ENGINE_TIMEOUT = float(os.environ.get("ENGINE_TIMEOUT", "120"))
@@ -90,6 +97,24 @@ async def call_analysis_service(
         return response.json()
     except Exception:
         return None
+
+
+@app.get("/api/leagues")
+async def leagues() -> JSONResponse:
+    """Catalogue des competitions proposees (selecteur du front)."""
+    return JSONResponse({"leagues": LEAGUE_CATALOG})
+
+
+@app.get("/api/fixtures")
+async def fixtures(
+    league: str = Query("eng.1"),
+    date: str = Query(""),
+) -> JSONResponse:
+    """Matchs d'une journee au format du calendrier (front)."""
+    date_compact = _normalize_date(date)
+    async with _client() as client:
+        events = await fetch_day_fixtures(client, league, date_compact)
+    return JSONResponse({"league": league, "date": date_compact, "events": events})
 
 
 @app.get("/api/health")
