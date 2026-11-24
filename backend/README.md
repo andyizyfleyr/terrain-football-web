@@ -33,7 +33,9 @@ GET /api/analyze   -> analyse complète d'une journée ou d'un match
 
 Le front consomme deux routes pour le calendrier mensuel :
 
-- `GET /api/leagues` : les 16 compétitions (slug ESPN, nom, pays, niveau) ;
+- `GET /api/leagues` : les 18 compétitions (slug ESPN, nom, pays, niveau),
+  championnats nationaux et coupes d'Europe (`uefa.champions`,
+  `uefa.europa`) ;
 - `GET /api/fixtures?league=eng.1&date=20261122` : les matchs de la
   journée au format du front (`id`, `date`, `name`, `home`, `away`,
   `venue`, `city`).
@@ -41,6 +43,12 @@ Le front consomme deux routes pour le calendrier mensuel :
 Le calendrier demande une journée par jour du mois : les journées sont
 mises en cache 5 minutes (`ESPN_DAY_CACHE_TTL`) pour ne pas envoyer une
 trentaine de scoreboards à ESPN d'affilée.
+
+Les coupes d'Europe ne publient pas de calendrier de journées mais de
+**phases** (journée de ligue, barrages, 8es…). Leurs jours de match sont
+donc déduits des plages de phases (`phase_calendar`, cache 12 h,
+`ESPN_PHASE_CALENDAR_TTL`) ; sans cela leur calendrier serait vide et
+`/api/smoke` les déclarerait cassées.
 
 ## Résilience
 

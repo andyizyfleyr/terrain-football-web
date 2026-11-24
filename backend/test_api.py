@@ -267,6 +267,11 @@ check(
     str(catalog[:2]),
 )
 check("Premier League au catalogue", any(l["slug"] == "eng.1" for l in catalog), str(catalog[:2]))
+check(
+    "coupes d'Europe au catalogue servi",
+    {"uefa.champions", "uefa.europa"} <= {l["slug"] for l in catalog},
+    str([l["slug"] for l in catalog if l["slug"].startswith("uefa.")]),
+)
 events = fixtures_payload.get("events", [])
 check("journée servie", len(events) == 1, str(fixtures_payload)[:200])
 check(
@@ -296,6 +301,9 @@ print("7. Auto-contrôle de production (/api/smoke)")
 
 
 async def fake_fixtures(client, league, date_compact):
+    # `completed` fait partie du contrat : /api/smoke exige un match
+    # reellement JOUE, pas seulement programme (une journée en cours ne
+    # prouve pas que la chaîne de données fonctionne).
     return {
         "events": [
             {
@@ -303,6 +311,7 @@ async def fake_fixtures(client, league, date_compact):
                 "name": "Hull City - Brighton",
                 "home": {"name": "Hull City"},
                 "away": {"name": "Brighton"},
+                "completed": True,
             }
         ],
         "calendar": ["20261122"],
@@ -363,6 +372,7 @@ async def fixtures_with_broken_league(client, league, date_compact):
                 "name": "Hull City - Brighton",
                 "home": {"name": "Hull City"},
                 "away": {"name": "Brighton"},
+                "completed": True,
             }
         ],
         "calendar": ["20261122"],
@@ -425,9 +435,30 @@ check(
     espn_module.resolve_league_slug("xyz.9"),
 )
 check(
-    "les 16 compétitions restent cataloguées",
-    len(catalog_slugs) == 16,
+    "les 18 compétitions restent cataloguées",
+    len(catalog_slugs) == 18,
     str(len(catalog_slugs)),
+)
+
+# Régression : la Ligue des Champions (et la Ligue Europa) étaient
+# absentes du catalogue, donc du sélecteur de compétitions du front —
+# alors que tout le reste de la chaîne (mapping FotMob, identité de
+# ligue, détection des matchs européens) les connaissait déjà.
+check(
+    "Ligue des Champions au catalogue",
+    "uefa.champions" in catalog_slugs,
+    str(catalog_slugs),
+)
+check(
+    "Ligue Europa au catalogue",
+    "uefa.europa" in catalog_slugs,
+    str(catalog_slugs),
+)
+check(
+    "les coupes d'Europe sont nommées en français",
+    {l["slug"]: l for l in espn_module.LEAGUE_CATALOG}.get("uefa.champions", {}).get("name")
+    == "Ligue des Champions",
+    str([l for l in espn_module.LEAGUE_CATALOG if l["slug"].startswith("uefa.")]),
 )
 
 # Chaque slug catalogué doit produire une URL ESPN distincte : une

@@ -881,6 +881,37 @@ console.log('10. Identité de championnat (collecte)');
     resolveLeagueSlug({ fotmobId: 999, name: 'Liga Mystery', country: 'ESP' }) === 'esp.1',
     resolveLeagueSlug({ fotmobId: 999, name: 'Liga Mystery', country: 'ESP' })
   );
+
+  // Coupes d'Europe : elles étaient absentes du catalogue du back-end
+  // (donc du sélecteur de compétitions) alors que les tables
+  // d'identité les connaissaient déjà. Le repli par nom doit aussi les
+  // retrouver : FotMob publie « Europe » et jamais un code pays à trois
+  // lettres, le pays ne peut donc pas les identifier.
+  check(
+    'ligue : Ligue des Champions (id 42) → uefa.champions',
+    resolveLeagueSlug({ fotmobId: 42 }) === 'uefa.champions',
+    resolveLeagueSlug({ fotmobId: 42 })
+  );
+  check(
+    'ligue : Ligue Europa (id 73) → uefa.europa',
+    resolveLeagueSlug({ fotmobId: 73 }) === 'uefa.europa',
+    resolveLeagueSlug({ fotmobId: 73 })
+  );
+  check(
+    'ligue : repli par nom pour la Ligue des Champions',
+    resolveLeagueSlug({ name: 'UEFA Champions League' }) === 'uefa.champions',
+    resolveLeagueSlug({ name: 'UEFA Champions League' })
+  );
+  check(
+    'ligue : repli par nom pour la Ligue Europa',
+    resolveLeagueSlug({ name: 'Europa League' }) === 'uefa.europa',
+    resolveLeagueSlug({ name: 'Europa League' })
+  );
+  check(
+    'ligue : « Europe » ne fabrique pas un slug de pays',
+    resolveLeagueSlug({ name: 'Ligue Mystery', country: 'EUR' }) !== 'eur.1',
+    resolveLeagueSlug({ name: 'Ligue Mystery', country: 'EUR' })
+  );
   check(
     'ligue : identifiant inconnu conservé de façon lisible',
     resolveLeagueSlug({ fotmobId: 999 }) === 'league-999',

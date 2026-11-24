@@ -254,11 +254,18 @@ async def smoke() -> JSONResponse:
         if not calendar:
             return False, "aucun calendrier ESPN"
         played = [d for d in calendar if d <= today_compact]
-        for day in reversed(played[-3:]):
+        # Contrat : la competition sert des matchs JOUES. Un match
+        # seulement programme (journee en cours) ne prouve pas que la
+        # chaine de donnees fonctionne : on remonte jusqu'a 10 journees
+        # passees avant de conclure.
+        for day in reversed(played[-10:]):
             day_result = await fetch_day_fixtures(client, slug, day)
-            if day_result.get("events"):
-                return True, f"{len(calendar)} journées, match le {day}"
-        return False, "aucun match sur les dernieres journees"
+            finished = [
+                event for event in day_result.get("events", []) if event.get("completed")
+            ]
+            if finished:
+                return True, f"{len(calendar)} journées, match joué le {day}"
+        return False, "aucun match termine sur les dernieres journees"
 
     async with _client() as client:
         results = await asyncio.gather(

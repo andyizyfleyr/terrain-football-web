@@ -75,7 +75,22 @@ export const LEAGUE_SLUG_BY_NAME: Record<string, string> = {
   superlig: 'tur.1',
   ligamx: 'mex.1',
   mls: 'usa.1',
+  // Coupes d'Europe : le repli par pays ne les atteint jamais (FotMob
+  // publie « Europe » ou « World »), le nom est donc la seule issue
+  // quand l'identifiant de ligue manque.
+  championsleague: 'uefa.champions',
+  uefachampionsleague: 'uefa.champions',
+  europaleague: 'uefa.europa',
+  uefaeuropaleague: 'uefa.europa',
 };
+
+/**
+ * Codes « pays » qui designent une zone continentale, pas une nation.
+ * Aucune competition de club n'est identifiee par ces codes : le repli
+ * `<code>.1` y fabriquerait un championnat inexistant (voir
+ * `resolveLeagueSlug`).
+ */
+const CONTINENTAL_COUNTRIES = new Set(['eur', 'uef', 'int', 'wld', 'wrl', 'eu']);
 
 export type LeagueIdentity = {
   /** Slug normalisé (`esp.1`) utilisé par le backtest et l'API. */
@@ -114,8 +129,17 @@ export function resolveLeagueSlug(input: {
   if (byName) return byName;
 
   const country = String(input.country ?? '').trim().toLowerCase();
-  if (country && country.length === 3 && /^[a-z]{3}$/.test(country)) {
+  if (
+    country &&
+    country.length === 3 &&
+    /^[a-z]{3}$/.test(country) &&
+    !CONTINENTAL_COUNTRIES.has(country)
+  ) {
     // Repli explicite et lisible : le pays identifie la Division 1.
+    // Les competitions continentales n'ont pas de pays : « Europe »
+    // produirait `eur.1`, un championnat qui n'existe pas, et les
+    // matchs de Ligue des Champions seraient rangés dans une Division
+    // fantôme du backtest. On préfère un slug inconnu, explicite.
     return `${country}.1`;
   }
 
