@@ -46,6 +46,7 @@ from espn import (  # noqa: E402
     _client,
     build_base_matches,
     compact_date,
+    fetch_day_all_leagues,
     fetch_day_fixtures,
     parse_iso,
 )
@@ -174,6 +175,36 @@ async def fixtures(
             "calendar": result.get("calendar", []),
         }
     )
+
+
+@app.get("/api/fixtures/all")
+async def fixtures_all(
+    date: str = Query(""),
+    leagues: str = Query("", description="Slugs separes par des virgules (defaut : tout le catalogue)"),
+) -> JSONResponse:
+    """Matchs d'une journee, toutes les competitions du catalogue.
+
+    Sert la page « Tous les matchs » : une seule requete pour l'ensemble
+    du catalogue, plutot qu'un appel par competition depuis le
+    navigateur. Le cache court de `fetch_day_fixtures` est partage avec
+    `/api/fixtures`, donc enchainer les deux ne double pas le trafic
+    vers ESPN.
+
+    `failed` liste les competitions dont le scoreboard n'a pas repondu :
+    le front peut ainsi distinguer « rien ne se joue » de « je n'ai pas
+    pu tout verifier ».
+    """
+    date_compact = _normalize_date(date)
+    if leagues.strip():
+        wanted = [slug.strip() for slug in leagues.split(",") if slug.strip()]
+        known = {item["slug"] for item in LEAGUE_CATALOG}
+        wanted = [slug for slug in wanted if slug in known]
+    else:
+        wanted = [item["slug"] for item in LEAGUE_CATALOG]
+
+    async with _client() as client:
+        payload = await fetch_day_all_leagues(client, date_compact, wanted)
+    return JSONResponse(payload)
 
 
 @app.get("/api/smoke")
