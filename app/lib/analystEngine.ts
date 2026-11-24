@@ -353,6 +353,14 @@ export type AnalystReport = {
     accuracy: number;
     valueRoi: number | null;
     valueBets: number;
+    /**
+     * false quand aucun seuil de « valeur » n'a été démontré sur
+     * l'historique de référence : la détection de valeur reste alors
+     * inactive. Ce drapeau est repris tel quel par les étiquettes de
+     * match, qui ne doivent pas annoncer une valeur que le moteur
+     * refuse d'annoncer.
+     */
+    valueThresholdDemonstrated?: boolean;
     /** Validation à grande échelle (football-data.co.uk), si disponible. */
     scaleValidation: ScaleValidation | null;
     limitations: string[];
@@ -2667,6 +2675,7 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
       accuracy: calibration.metrics.accuracy,
       valueRoi: calibration.metrics.valueRoi,
       valueBets: calibration.metrics.valueBets,
+      valueThresholdDemonstrated: calibration.valueThresholdDemonstrated !== false,
       scaleValidation: calibration.metrics.scaleValidation ?? null,
       limitations: calibration.limitations || [],
     },
