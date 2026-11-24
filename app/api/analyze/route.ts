@@ -4,6 +4,7 @@ import {
   enrichMatches,
   hasCompleteAnalysis,
 } from '../../lib/analysisService';
+import { buildApiError, classifyNetworkError } from '../../lib/apiErrors';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -82,12 +83,25 @@ export async function GET(request: NextRequest) {
     const upstreamRes = await fetch(upstreamUrl, {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      signal: AbortSignal.timeout(25_000),
     });
 
     if (!upstreamRes.ok) {
+      // 429 et 5xx sont transitoires : on le dit explicitement pour que
+      // l'interface puisse proposer de réessayer.
+      const code = upstreamRes.status === 429
+        ? 'rate_limited'
+        : upstreamRes.status === 404
+          ? 'not_found'
+          : 'upstream_unavailable';
       return NextResponse.json(
-        { error: `Erreur backend (${upstreamRes.status})`, league, date, matches: [] },
-        { status: upstreamRes.status }
+        buildApiError(code, {
+          message: `Le service de données a répondu ${upstreamRes.status}.`,
+          detail: `HTTP ${upstreamRes.status} sur ${upstreamUrl}`,
+          league,
+          date,
+        }),
+        { status: upstreamRes.status === 429 || upstreamRes.status === 404 ? upstreamRes.status : 502 }
       );
     }
 
@@ -97,6 +111,16 @@ export async function GET(request: NextRequest) {
     if (!rawMatches.length) {
       return NextResponse.json({
         ...basePayload,
+        // Aucune rencontre : ce n'est pas une panne, c'est une journée vide
+        // ou des données indisponibles. Le contrat le dit explicitement.
+        error: buildApiError('no_data', {
+          message: 'Aucune rencontre disponible pour cette journée.',
+          league,
+          date,
+          degraded: true,
+        }).error,
+        code: 'no_data',
+        degraded: true,
         sources: ['Données publiques'],
       });
     }
@@ -113,6 +137,7 @@ export async function GET(request: NextRequest) {
     if (hasCompleteAnalysis(rawMatches)) {
       return NextResponse.json({
         ...basePayload,
+        degraded: false,
         matches: rawMatches.map(sanitizeMatchStrings),
         sources: analysisSources(rawMatches.some(m => Boolean(m?.fotmob))),
       });
@@ -126,13 +151,16 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       ...basePayload,
+      // Réponses partielles : au moins un match n'a pas pu être analysé.
+      degraded: !hasCompleteAnalysis(enrichedMatches),
       matches: enrichedMatches.map(sanitizeMatchStrings),
       sources: analysisSources(enrichedMatches.some(m => Boolean(m?.fotmob))),
     });
-  } catch {
+  } catch (error) {
+    const { code, detail } = classifyNetworkError(error);
     return NextResponse.json(
-      { error: 'Analyse momentanément indisponible.', league, date, matches: [] },
-      { status: 502 }
+      buildApiError(code, { detail, league, date }),
+      { status: code === 'upstream_timeout' ? 504 : 502 }
     );
   }
 }

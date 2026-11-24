@@ -2,6 +2,7 @@
 
 import { pct } from '../lib/terrain';
 import { pronosticsMarketCount, PronosticsPanel } from './PronosticsPanel';
+import { DerivedMarketsStatus } from './DerivedMarketsStatus';
 
 function fmtPct(value: any): string {
   return typeof value === 'number' ? `${Math.round(value * 100)} %` : '—';
@@ -66,6 +67,9 @@ export function AnalystReportView({
   const tactics = analyst.tactics || {};
   const schedule = analyst.scheduleStrength || {};
   const calibration = analyst.calibration || {};
+  const disclosure = analyst.disclosure || null;
+  const scaleValidation = calibration.scaleValidation || null;
+  const traps = Array.isArray(analyst.traps) ? analyst.traps : [];
   const uncertainty = analyst.uncertainty || {};
   const homeName = analyst.homeName || 'Dom.';
   const awayName = analyst.awayName || 'Ext.';
@@ -279,6 +283,100 @@ export function AnalystReportView({
           </div>
         ) : null}
       </section>
+
+      {/* ---------- Disclosure transparente ---------- */}
+      {disclosure ? (
+        <section className="analystBlock">
+          <div className="subsectionHeading">
+            <span className="sectionKicker">CE QUE VALUT CE MOTEUR</span>
+            <h3>Comparaison mesurée au marché de référence</h3>
+          </div>
+          <div className={`disclosureCard disclosure${disclosure.verdict === 'outperform' ? 'Good' : disclosure.verdict === 'sous le marché' ? 'Bad' : 'Neutral'}`}>
+            <p className="disclosureHeadline">{disclosure.headline}</p>
+            <p className="disclosureDetail">{disclosure.detail}</p>
+            {disclosure.caveats.length ? (
+              <ul className="disclosureCaveats">
+                {disclosure.caveats.map(caveat => (
+                  <li key={caveat}>{caveat}</li>
+                ))}
+              </ul>
+            ) : null}
+            {disclosure.valueBetsDisabled ? (
+              <p className="disclosureValueDisabled">
+                Les recommandations de « valeur » sont désactivées : aucun seuil d advantageous n&apos;est démontré
+                sur l&apos;échantillon de référence.
+              </p>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      {/* ---------- Avertissements « match piège » ---------- */}
+      {traps.length ? (
+        <section className="analystBlock">
+          <div className="subsectionHeading">
+            <span className="sectionKicker">AVERTISSEMENTS</span>
+            <h3>Cette rencontre peut déjouer les tendances</h3>
+            <p>
+              Les avertissements ci-dessous ne changent pas la probabilité annoncée : ils signalent que la confiance
+              affichée doit être prise avec prudence. Aucune donnée manquante n&apos;est remplacée par une supposition.
+            </p>
+          </div>
+          <div className="trapList">
+            {traps.map(trap => (
+              <div className={`trapItem trap${trap.severity === 'warning' ? 'Warn' : 'Info'}`} key={trap.id}>
+                <b>{trap.label}</b>
+                <p>{trap.detail}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {/* ---------- Statut des marchés dérivés ---------- */}
+      <DerivedMarketsStatus />
+
+      {/* ---------- Validation à grande échelle ---------- */}
+      {scaleValidation ? (
+        <section className="analystBlock">
+          <div className="subsectionHeading">
+            <span className="sectionKicker">VALIDATION À GRANDE ÉCHELLE</span>
+            <h3>{scaleValidation.sampleSize.toLocaleString('fr-FR')} rencontres, 5 championnats, 8 saisons</h3>
+            <p>
+              Rejeu chronologique strict sur le jeu de données football-data.co.uk ({scaleValidation.period}).
+              Chaque rencontre est prédite avec la seule information disponible avant son coup d’envoi, et la calibration
+              est réajustée à chaque changement de saison sur les seules rencontres antérieures.
+            </p>
+          </div>
+          <div className="calibrationGrid">
+            <div className="calibrationCard">
+              <small>Modèle pur</small>
+              <b>{scaleValidation.modelLogLoss.toFixed(4)}</b>
+              <em>mieux que le hasard (1,0986)</em>
+            </div>
+            <div className="calibrationCard">
+              <small>Modèle calibré</small>
+              <b>{scaleValidation.calibratedLogLoss.toFixed(4)}</b>
+              <em>marché : {scaleValidation.marketLogLoss.toFixed(4)}</em>
+            </div>
+            <div className="calibrationCard">
+              <small>Meilleur bookmaker</small>
+              <b>{scaleValidation.pinnacleLogLoss.toFixed(4)}</b>
+              <em>Pinnacle, sous-échantillon</em>
+            </div>
+            <div className="calibrationCard">
+              <small>Paris à « valeur »</small>
+              <b>{scaleValidation.valueBets}</b>
+              <em>{scaleValidation.valueDemonstrated ? 'seuil démontré' : 'aucun seuil démontré'}</em>
+            </div>
+          </div>
+          <p className="analystOddsNote">
+            Ce rejeu ne dispose ni des xG ni des statistiques de joueurs : il constitue une borne INFÉRIEURE de la
+            performance du moteur en production. Les cotes employées sont des cotes d’OUVERTURE (avant le coup d’envoi),
+            pas des cotes de clôture.
+          </p>
+        </section>
+      ) : null}
 
       {/* ---------- Validation empirique & incertitude ---------- */}
       <section className="analystBlock">

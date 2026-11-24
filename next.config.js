@@ -5,5 +5,12 @@ const nextConfig = {
     const apiOrigin = process.env.BACKEND_API_URL || 'https://terrain-football-api.vercel.app';
     return [{ source: '/api/:path*', destination: `${apiOrigin}/api/:path*` }];
   },
+  // Les rapports de validation (marchés dérivés) sont lus au runtime par
+  // la route `/api/markets/validation`. Sur Vercel, le traçage de fichiers
+  // doit les inclure explicitement dans le bundle de la fonction, sinon la
+  // route répondrait 404 en production alors qu'elle fonctionne en local.
+  outputFileTracingIncludes: {
+    '/api/markets/validation': ['./data/markets-validation.json'],
+  },
 };
 module.exports = nextConfig;

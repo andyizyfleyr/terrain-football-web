@@ -54,16 +54,26 @@ def stub_build(league: str, date_compact: str, match_ids=None):
     return _inner()
 
 
-def stub_engine(ok: bool):
+def stub_engine(ok: bool, error: dict | None = None):
+    """Renvoie (analyse, erreur) — contrat de call_analysis_service."""
+
     async def _inner(client, league, date_compact, matches):
         if not ok:
-            return None
-        return {
-            "league": league,
-            "date": date_compact,
-            "matches": [dict(ENGINE_MATCH)],
-            "sources": ["Données publiques", "Statistiques détaillées"],
-        }
+            return None, error or {
+                "code": "upstream_unavailable",
+                "retryable": True,
+                "error": "Le moteur d'analyse est momentanément injoignable.",
+                "detail": "test",
+            }
+        return (
+            {
+                "league": league,
+                "date": date_compact,
+                "matches": [dict(ENGINE_MATCH)],
+                "sources": ["Données publiques", "Statistiques détaillées"],
+            },
+            None,
+        )
 
     return _inner
 
@@ -89,6 +99,49 @@ check("statut 200", response.status_code == 200, str(response.status_code))
 check("analyse absente", payload.get("analysis") is None, str(payload.get("analysis")))
 check("matchs bruts présents", len(payload.get("matches", [])) == 1, str(payload.get("matches")))
 check("aucun bloc analyst improvisé", "analyst" not in payload["matches"][0])
+check("réponse marquée dégradée", payload.get("degraded") is True, str(payload.get("degraded")))
+check(
+    "code d'erreur explicite",
+    payload.get("code") == "upstream_unavailable",
+    str(payload.get("code")),
+)
+check("erreur réessayable signalée", payload.get("retryable") is True, str(payload.get("retryable")))
+check("message lisible présent", bool(payload.get("error")), str(payload.get("error")))
+
+print("2bis. Repli avec un code d'erreur distinct (délai dépassé)")
+api.call_analysis_service = stub_engine(
+    False,
+    {
+        "code": "upstream_timeout",
+        "retryable": True,
+        "error": "Le moteur d'analyse a mis trop de temps à répondre.",
+        "detail": "timeout",
+    },
+)
+with TestClient(api.app) as client:
+    response = client.get("/api/analyze?league=eng.1&date=20261122")
+    payload = response.json()
+check("code délai dépassé conservé", payload.get("code") == "upstream_timeout", str(payload.get("code")))
+check("toujours dégradé", payload.get("degraded") is True, str(payload.get("degraded")))
+
+print("2ter. Aucune rencontre : ce n'est pas une panne")
+
+
+async def _empty_base(league, date_compact, match_ids=None):
+    return []
+
+
+api.build_base_matches = _empty_base
+with TestClient(api.app) as client:
+    response = client.get("/api/analyze?league=eng.1&date=20261122")
+    payload = response.json()
+check("statut 404", response.status_code == 404, str(response.status_code))
+check("code no_data explicite", payload.get("code") == "no_data", str(payload.get("code")))
+check("dégradé signalé", payload.get("degraded") is True, str(payload.get("degraded")))
+check("non réessayable", payload.get("retryable") is False, str(payload.get("retryable")))
+
+# On rétablit le stub de matchs pour la suite.
+api.build_base_matches = stub_build
 
 print("3. Moteur joignable mais analyse non produite (repli)")
 async def stub_engine_partial(client, league, date_compact, matches):

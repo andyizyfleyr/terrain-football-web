@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { analysisSources, enrichMatches, hasCompleteAnalysis } from '../../../lib/analysisService';
+import { buildApiError, classifyNetworkError } from '../../../lib/apiErrors';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -40,14 +41,17 @@ function isAuthorized(request: NextRequest): boolean {
 
 export async function POST(request: NextRequest) {
   if (!isAuthorized(request)) {
-    return NextResponse.json({ error: 'Accès refusé au service d’analyse.' }, { status: 401 });
+    return NextResponse.json(buildApiError('unauthorized'), { status: 401 });
   }
 
   let body: any = {};
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Corps JSON invalide.' }, { status: 400 });
+    return NextResponse.json(
+      buildApiError('bad_request', { message: 'Corps JSON invalide.' }),
+      { status: 400 }
+    );
   }
 
   const league = String(body?.league || '').trim() || 'eng.1';
@@ -56,7 +60,12 @@ export async function POST(request: NextRequest) {
 
   if (!baseMatches.length) {
     return NextResponse.json(
-      { error: 'Aucun match brut fourni : le service d’analyse n’implémente pas l’ingestion.' },
+      buildApiError('bad_request', {
+        message:
+          'Aucun match brut fourni : le service d’analyse n’implémente pas l’ingestion.',
+        league,
+        date,
+      }),
       { status: 400 }
     );
   }
@@ -65,18 +74,30 @@ export async function POST(request: NextRequest) {
   // Vue match unique : on récupère l'effectif, les valeurs et le coach.
   const deepTeamFetch = baseMatches.length === 1;
 
-  const { matches, anyFotmob } = await enrichMatches(baseMatches, {
-    leagueSlug: league,
-    compactDate,
-    deepTeamFetch,
-  });
+  try {
+    const { matches, anyFotmob } = await enrichMatches(baseMatches, {
+      leagueSlug: league,
+      compactDate,
+      deepTeamFetch,
+    });
 
-  return NextResponse.json({
-    league,
-    date,
-    engine: 'v3',
-    complete: hasCompleteAnalysis(matches),
-    matches,
-    sources: analysisSources(anyFotmob),
-  });
+    const complete = hasCompleteAnalysis(matches);
+    return NextResponse.json({
+      league,
+      date,
+      engine: 'v3',
+      complete,
+      // `degraded` : la réponse est utilisable mais au moins un match
+      // n'a pas pu être analysé (source absente, données partielles).
+      degraded: !complete,
+      matches,
+      sources: analysisSources(anyFotmob),
+    });
+  } catch (error) {
+    const { code, detail } = classifyNetworkError(error);
+    return NextResponse.json(
+      buildApiError(code, { detail, league, date }),
+      { status: code === 'upstream_timeout' ? 504 : 502 }
+    );
+  }
 }

@@ -127,6 +127,20 @@ export type BacktestMatch = {
   homeXgot: number | null;
   awayXgot: number | null;
   odds: { home: number; draw: number; away: number } | null;
+  /**
+   * Cotes 1X2 par fournisseur (ex. Bet365, Pinnacle). Le triplet `odds`
+   * ci-dessus reste le marché de référence de la calibration.
+   */
+  oddsByProvider?: Record<string, { home: number; draw: number; away: number }>;
+  /**
+   * Marchés dérivés avec cotes réelles (validation des pronostics) :
+   * over/under 2,5, BTTS, Asian handicap.
+   */
+  derivedOdds?: {
+    over25?: { over: number; under: number };
+    btts?: { yes: number; no: number };
+    ah?: { line: number; home: number; away: number };
+  };
   provider: string | null;
   /** Joueurs absents annoncés avant le coup d'envoi (information publique). */
   unavailableHome: number[];
@@ -183,6 +197,17 @@ export type BacktestSample = {
   homeGoals: number;
   awayGoals: number;
   odds: { home: number; draw: number; away: number } | null;
+  /** Probabilité « plus de 2,5 buts » annoncée par le modèle. */
+  over25: number | null;
+  /** Probabilité « les deux équipes marquent » annoncée par le modèle. */
+  btts: number | null;
+  /**
+   * Probabilités dé-vigguées par fournisseur (ex. Bet365, Pinnacle).
+   * Permet de comparer plusieurs marchés sur le même jeu de rencontres.
+   */
+  markets: Record<string, OutcomeProbs>;
+  /** Cotes brutes 1X2 par fournisseur (pour le ROI). */
+  rawOdds: Record<string, { home: number; draw: number; away: number }>;
 };
 
 export type BacktestResult = {
@@ -252,7 +277,8 @@ function emptyAggregate(id: number, name: string): TeamAggregate {
  * par date pour l'évaluation conjointe.
  */
 export function buildWalkForwardInputs(
-  dataset: BacktestDataset
+  dataset: BacktestDataset,
+  options?: { simulationRuns?: number }
 ): { inputs: AnalystInput[]; naive: OutcomeProbs[] } {
   const matches = dataset.matches.slice().sort((a, b) => a.date.localeCompare(b.date));
 
@@ -271,7 +297,7 @@ export function buildWalkForwardInputs(
   // Rejeu indépendant par championnat.
   const byId = new Map<string, { input: AnalystInput; naive: OutcomeProbs }>();
   groups.forEach((group, league) => {
-    const built = buildLeagueWalkForward(group, snapshots, league);
+    const built = buildLeagueWalkForward(group, snapshots, league, options);
     group.forEach((match, index) => {
       byId.set(match.id, { input: built.inputs[index], naive: built.naive[index] });
     });
@@ -343,7 +369,8 @@ function emptyInput(match: BacktestMatch): AnalystInput {
 function buildLeagueWalkForward(
   leagueMatches: BacktestMatch[],
   snapshots: Map<number, BacktestTeamSnapshot>,
-  league: string
+  league: string,
+  options?: { simulationRuns?: number }
 ): { inputs: AnalystInput[]; naive: OutcomeProbs[] } {
   const matches = leagueMatches;
   const teamNames = new Map<number, string>();
@@ -611,6 +638,7 @@ function buildLeagueWalkForward(
     const input: AnalystInput = {
       matchId: match.id,
       kickoffIso: `${match.date}T15:00:00.000Z`,
+      simulationRuns: options?.simulationRuns,
       baseLambdas,
       covarianceSamples: priorForCovariance,
       halfTimeSamples: priorWithHalfTime,
@@ -727,11 +755,17 @@ function topPick(probs: OutcomeProbs): 0 | 1 | 2 {
 
 export function runBacktest(
   dataset: BacktestDataset,
-  options?: { maxMatches?: number; calibration?: Partial<CalibrationParams> }
+  options?: {
+    maxMatches?: number;
+    calibration?: Partial<CalibrationParams>;
+    simulationRuns?: number;
+  }
 ): BacktestResult {
   const matches = dataset.matches.slice().sort((a, b) => a.date.localeCompare(b.date));
   const limit = options?.maxMatches ?? matches.length;
-  const { inputs, naive } = buildWalkForwardInputs(dataset);
+  const { inputs, naive } = buildWalkForwardInputs(dataset, {
+    simulationRuns: options?.simulationRuns,
+  });
 
   const samples: BacktestSample[] = [];
   const start = Math.max(0, matches.length - limit);
@@ -758,6 +792,22 @@ export function runBacktest(
       ? { home: devig.probs.home, draw: devig.probs.draw, away: devig.probs.away }
       : null;
 
+    // Marchés additionnels (Bet365, Pinnacle, moyenne) : chacun est
+    // dé-viggué séparément pour être comparable.
+    const markets: Record<string, OutcomeProbs> = {};
+    const rawOdds: Record<string, { home: number; draw: number; away: number }> = {};
+    for (const [provider, triple] of Object.entries(match.oddsByProvider || {})) {
+      if (!triple || !Number.isFinite(triple.home) || !Number.isFinite(triple.draw) || !Number.isFinite(triple.away)) continue;
+      const providerDevig = devigThreeWayDecimal(triple);
+      if (!providerDevig) continue;
+      markets[provider] = {
+        home: providerDevig.probs.home,
+        draw: providerDevig.probs.draw,
+        away: providerDevig.probs.away,
+      };
+      rawOdds[provider] = { ...triple };
+    }
+
     const outcome: 0 | 1 | 2 =
       match.homeGoals > match.awayGoals ? 0 : match.homeGoals === match.awayGoals ? 1 : 2;
 
@@ -776,6 +826,10 @@ export function runBacktest(
       homeGoals: match.homeGoals,
       awayGoals: match.awayGoals,
       odds: match.odds,
+      over25: Number.isFinite(report.market.pureModel.over25) ? report.market.pureModel.over25 : null,
+      btts: Number.isFinite(report.market.pureModel.btts) ? report.market.pureModel.btts : null,
+      markets,
+      rawOdds,
     });
   }
 

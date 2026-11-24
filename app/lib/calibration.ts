@@ -60,6 +60,43 @@ export type CalibrationMetrics = {
   valueRoi: number | null;
   valueBets: number;
   valueThreshold: number;
+  /**
+   * Validation à GRANDE ÉCHELLE sur un jeu de données tiers
+   * (football-data.co.uk : 5 championnat, 8 saisons, 14 608 rencontres,
+   * cotes Bet365 et Pinnacle). Elle est publiée à part car elle rejoue
+   * le moteur SANS les données xG ni les statistiques de joueurs :
+   * c'est une borne INFÉRIEURE de la performance du moteur de
+   * production, mais elle porte sur un échantillon 60 fois plus grand.
+   */
+  scaleValidation?: ScaleValidation;
+};
+
+/** Résultats de la validation à grande échelle (football-data.co.uk). */
+export type ScaleValidation = {
+  /** Nombre de rencontres rejouées. */
+  sampleSize: number;
+  /** Championnats couverts. */
+  leagues: string;
+  /** Période couverte. */
+  period: string;
+  /** Log-loss du modèle pur (non calibré). */
+  modelLogLoss: number;
+  /** Log-loss du modèle calibré, walk-forward strict. */
+  calibratedLogLoss: number;
+  /** Log-loss du marché de référence (moyenne des bookmakers, dé-vigguée). */
+  marketLogLoss: number;
+  /** Log-loss de Pinnacle (échantillon partiel). */
+  pinnacleLogLoss: number;
+  /** Exactitude du modèle calibré. */
+  accuracy: number;
+  /** Score de Brier du modèle calibré. */
+  brier: number;
+  /** Nombre de paris à « valeur » retenus. */
+  valueBets: number;
+  /** ROI mesuré sur ces paris (null si aucun pari). */
+  valueRoi: number | null;
+  /** Le seuil de valeur est-il démontré à cette échelle ? */
+  valueDemonstrated: boolean;
 };
 
 export type ConfidenceBin = {

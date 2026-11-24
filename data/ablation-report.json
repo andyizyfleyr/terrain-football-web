@@ -1,0 +1,240 @@
+{
+  "generatedAt": "2026-11-24T12:35:08.097Z",
+  "dataset": {
+    "generatedAt": "2026-11-24T11:35:40.486Z",
+    "source": "football-data.co.uk",
+    "sources": {
+      "cache": 40
+    },
+    "mirror": "https://github.com/kokosing/autobet (secours)",
+    "seasons": [
+      "0809",
+      "0910",
+      "1011",
+      "1112",
+      "1213",
+      "1314",
+      "1415",
+      "1516"
+    ],
+    "divisions": [
+      {
+        "div": "E0",
+        "league": "eng.1",
+        "label": "Premier League"
+      },
+      {
+        "div": "SP1",
+        "league": "esp.1",
+        "label": "La Liga"
+      },
+      {
+        "div": "I1",
+        "league": "ita.1",
+        "label": "Serie A"
+      },
+      {
+        "div": "D1",
+        "league": "deu.1",
+        "label": "Bundesliga"
+      },
+      {
+        "div": "F1",
+        "league": "fra.1",
+        "label": "Ligue 1"
+      }
+    ],
+    "matches": 14608,
+    "teams": 164,
+    "coverage": {
+      "bet365": 14604,
+      "pinnacle": 7295,
+      "marketAverage": 14607,
+      "overUnder25": 14607,
+      "referee": 3040,
+      "halfTime": 14607
+    },
+    "perSeason": {
+      "E0-0809": 380,
+      "E0-0910": 380,
+      "E0-1011": 380,
+      "E0-1112": 380,
+      "E0-1213": 380,
+      "E0-1314": 380,
+      "E0-1415": 380,
+      "E0-1516": 380,
+      "SP1-0809": 380,
+      "SP1-0910": 380,
+      "SP1-1011": 380,
+      "SP1-1112": 380,
+      "SP1-1213": 380,
+      "SP1-1314": 380,
+      "SP1-1415": 380,
+      "SP1-1516": 380,
+      "I1-0809": 380,
+      "I1-0910": 380,
+      "I1-1011": 380,
+      "I1-1112": 380,
+      "I1-1213": 380,
+      "I1-1314": 380,
+      "I1-1415": 380,
+      "I1-1516": 380,
+      "D1-0809": 306,
+      "D1-0910": 306,
+      "D1-1011": 306,
+      "D1-1112": 306,
+      "D1-1213": 306,
+      "D1-1314": 306,
+      "D1-1415": 306,
+      "D1-1516": 306,
+      "F1-0809": 380,
+      "F1-0910": 380,
+      "F1-1011": 380,
+      "F1-1112": 380,
+      "F1-1213": 380,
+      "F1-1314": 380,
+      "F1-1415": 380,
+      "F1-1516": 380
+    },
+    "period": "2008-08-09 → 2016-05-17",
+    "oddsNature": {
+      "type": "ouverture (pre-match)",
+      "isClosing": false,
+      "providers": {
+        "bet365": "colonnes B365H / B365D / B365A / B365>2.5 / B365<2.5",
+        "pinnacle": "colonnes PSH / PSD / PSA",
+        "average": "moyenne arithmétique des cotes dé-vigguées disponibles"
+      },
+      "note": "Ces cotes ne reflètent donc pas le prix auquel le marché a finalement équilibré le match : toute conclusion sur la marge de/bookmaker ou sur la 'valeur' doit être formulée en référence à des cotes d’ouverture, et non de clôture."
+    }
+  },
+  "baseline": {
+    "logLossCalibre": 0.977,
+    "logLossPur": 1.0173,
+    "samples": 14608
+  },
+  "marketLogLoss": 0.9769,
+  "modules": [
+    {
+      "module": "01",
+      "nom": "ρ, covariance, periods",
+      "role": "Dépendance entre les buts, situations partagées, répartition par période",
+      "logLossPur": 1.0176,
+      "deltaPur": 0.0003,
+      "pValuePur": 0.358622,
+      "zPur": 0.918,
+      "logLossCalibre": 0.977,
+      "deltaCalibre": 0,
+      "pValueCalibre": 0.654614,
+      "samples": 14608,
+      "verdict": "contribution positive mais NON significative",
+      "dureeMs": 104446
+    },
+    {
+      "module": "02",
+      "nom": "référence championnat",
+      "role": "Moyennes de championnat, avantage domicile, force relative des équipes",
+      "logLossPur": 1.0315,
+      "deltaPur": 0.0142,
+      "pValuePur": 0,
+      "zPur": 6.304,
+      "logLossCalibre": 0.9769,
+      "deltaCalibre": 0,
+      "pValueCalibre": 0.438039,
+      "samples": 14608,
+      "verdict": "CONTRIBUTION SIGNIFICATIVE (+0.0142)",
+      "dureeMs": 110208
+    },
+    {
+      "module": "03",
+      "nom": "finition, gardiens, tirs",
+      "role": "Surperformance de finition, qualité du gardien adverse, qualité des tirs",
+      "logLossPur": 1.0169,
+      "deltaPur": -0.0004,
+      "pValuePur": 0.000033,
+      "zPur": -4.155,
+      "logLossCalibre": 0.977,
+      "deltaCalibre": 0,
+      "pValueCalibre": 0.310259,
+      "samples": 14608,
+      "verdict": "DÉTRUIT DE L'INFORMATION (-0.0004)",
+      "dureeMs": 108348
+    },
+    {
+      "module": "04",
+      "nom": "absences et onze",
+      "role": "Impact des absents sur la contribution réelle, force du onze titulaire",
+      "logLossPur": 1.0173,
+      "deltaPur": 0,
+      "pValuePur": 1,
+      "zPur": 0,
+      "logLossCalibre": 0.977,
+      "deltaCalibre": 0,
+      "pValueCalibre": 1,
+      "samples": 14608,
+      "verdict": "contribution NULLE (écart non significatif)",
+      "dureeMs": 94527
+    },
+    {
+      "module": "05",
+      "nom": "confrontation tactique",
+      "role": "Tempo, ajustements de forces selon les profils de jeu",
+      "logLossPur": 1.0173,
+      "deltaPur": 0,
+      "pValuePur": 1,
+      "zPur": 0,
+      "logLossCalibre": 0.977,
+      "deltaCalibre": 0,
+      "pValueCalibre": 1,
+      "samples": 14608,
+      "verdict": "contribution NULLE (écart non significatif)",
+      "dureeMs": 94787
+    },
+    {
+      "module": "06",
+      "nom": "calibration marché",
+      "role": "Température, mélange avec le marché dé-viggué, détection de valeur",
+      "logLossPur": 1.0173,
+      "deltaPur": 0,
+      "pValuePur": 1,
+      "zPur": 0,
+      "logLossCalibre": 0.977,
+      "deltaCalibre": 0,
+      "pValueCalibre": 1,
+      "samples": 14608,
+      "verdict": "contribution NULLE (écart non significatif)",
+      "dureeMs": 108820
+    },
+    {
+      "module": "07",
+      "nom": "calendrier, surface, météo",
+      "role": "Fatigue, enjeux, séries, surface, arbitre, météo",
+      "logLossPur": 1.0198,
+      "deltaPur": 0.0024,
+      "pValuePur": 0,
+      "zPur": 7.898,
+      "logLossCalibre": 0.977,
+      "deltaCalibre": 0,
+      "pValueCalibre": 0.812137,
+      "samples": 14608,
+      "verdict": "CONTRIBUTION SIGNIFICATIVE (+0.0024)",
+      "dureeMs": 104091
+    },
+    {
+      "module": "08",
+      "nom": "simulation Monte-Carlo",
+      "role": "Pronostics dérivés (mi-temps, premier but, etc.) — sans effet sur le 1X2",
+      "logLossPur": 1.0173,
+      "deltaPur": 0,
+      "pValuePur": 1,
+      "zPur": 0,
+      "logLossCalibre": 0.977,
+      "deltaCalibre": 0,
+      "pValueCalibre": 1,
+      "samples": 14608,
+      "verdict": "sans effet sur le 1X2 (pronostics dérivés uniquement)",
+      "dureeMs": 106709
+    }
+  ],
+  "note": "Aucune suppression n’est effectuée par ce script : les conclusions sont des propositions."
+}

@@ -16,7 +16,7 @@
  *
  * Exécution : npm run check:backtest
  */
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { COMBINED_BACKTEST_DATASET } from '../app/lib/backtestDatasetCombined.ts';
 import { buildWalkForwardInputs, runBacktest, temporalFoldIndex, type BacktestDataset } from '../app/lib/backtest.ts';
 import { DEFAULT_CALIBRATION } from '../app/lib/calibrationParams.ts';
@@ -384,6 +384,51 @@ if (WRITE && (!failures || FORCE)) {
   // texte généré casserait la chaîne de la limitation.
   const roiText =
     p.metrics.valueRoi === null ? '—' : `${(p.metrics.valueRoi * 100).toFixed(1)} %`;
+
+  // Validation à grande échelle : le rapport strict (14 608 rencontres,
+  // 5 championnats, 8 saisons) est lu S'IL EXISTE. Sans lui, aucun bloc
+  // n'est écrit : les métriques publiées restent celles du seul
+  // ajustement de production.
+  const reportPath = 'data/backtest-report.json';
+  let scaleValidationBlock = '';
+  let scaleValidationNote = '';
+  if (existsSync(reportPath)) {
+    try {
+      const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
+      const pick = (name: string) =>
+        (report.global?.reports || []).find((entry: any) => entry.name === name);
+      const calibrated = pick('modèle calibré');
+      const market = pick('moyenne marché');
+      const raw = pick('modèle brut');
+      const pinnacle = pick('Pinnacle dé-viggué');
+      const roi = report.global?.roi || {};
+      if (calibrated && market) {
+        scaleValidationBlock = [
+          '    // Validation à grande échelle (football-data.co.uk).',
+          '    scaleValidation: {',
+          `      sampleSize: ${calibrated.logLoss.samples},`,
+          `      leagues: '${Object.keys(report.perLeague || {}).join(', ')}',`,
+          `      period: '${report.dataset?.period || ''}',`,
+          `      modelLogLoss: ${raw?.logLoss?.value ?? 0},`,
+          `      calibratedLogLoss: ${calibrated.logLoss.value},`,
+          `      marketLogLoss: ${market.logLoss.value},`,
+          `      pinnacleLogLoss: ${pinnacle?.logLoss?.value ?? 0},`,
+          `      accuracy: ${calibrated.accuracy.value},`,
+          `      brier: ${calibrated.brier.value},`,
+          `      valueBets: ${roi.bets ?? 0},`,
+          `      valueRoi: ${roi.roi === null || roi.roi === undefined ? 'null' : roi.roi},`,
+          `      valueDemonstrated: ${(roi.bets ?? 0) > 0},`,
+          '    },',
+        ].join('\n');
+        scaleValidationNote = `    'VALIDATION À GRANDE ÉCHELLE (football-data.co.uk, ${calibrated.logLoss.samples} rencontres, ${Object.keys(report.perLeague || {}).length} championnats, ${report.dataset?.seasons?.length || 0} saisons, cotes Bet365 et Pinnacle) : le modèle calibré atteint une log-loss de ${calibrated.logLoss.value} contre ${market.logLoss.value} pour la moyenne de marché dé-vigguée. Le modèle pur (non calibré) atteint ${raw?.logLoss?.value ?? '—'}, soit mieux que le tirage aléatoire (1,0986) mais moins bon que le marché. CONCLUSION : à cette échelle, le modèle n\'est PAS meilleur que le marché, et aucun pari à « valeur » ne survit au seuil de 2 points (${roi.bets ?? 0} pari retenu). Ce rejeu ne dispose ni des xG ni des statistiques de joueurs : c\'est une borne INFÉRIEURE de la performance du moteur de production, et un échantillon 60 fois plus grand que celui du calibrage publié.',`;
+        scaleValidationNote += `    'Les cotes employées dans cette validation sont des cotes d\'OUVERTURE (avant le coup d\'envoi) : l\'archive football-data.co.uk ne publie pas de cotes de clôture pour les saisons 0809 à 1516. Les conclusions sur la marge des bookmakers doivent donc être formulées en référence à des cotes d\'ouverture.',`;
+        scaleValidationNote += `    'Deux défauts de référence ont été corrigés grâce à cette validation : (1) sans données xG, la référence de buts attendus était rétrécie vers une moyenne de xG nulle, ce qui faisait s\'effondrer les buts attendus (0,53 au lieu de 1,63) ; (2) l\'absence de données tactiques était traitée comme un style « peu offensif » (tempo 0,88), ce qui retirait 12 % des buts attendus alors que la moyenne réelle du championnat est de 2,76. Une donnée absente n\'est jamais traitée comme une preuve.',`;
+      }
+    } catch {
+      scaleValidationBlock = '';
+      scaleValidationNote = '';
+    }
+  }
   const content = `/* ------------------------------------------------------------------ */
 /* PARAMÈTRES DE CALIBRATION (ajustés sur backtest walk-forward)       */
 /* ------------------------------------------------------------------ */
@@ -454,6 +499,7 @@ ${bins}
     valueRoi: ${p.metrics.valueRoi},
     valueBets: ${p.metrics.valueBets},
     valueThreshold: ${p.metrics.valueThreshold},
+${scaleValidationBlock}
   },
   dataset: '${p.dataset}',
   fittedAt: '${p.fittedAt}',
@@ -467,6 +513,7 @@ ${bins}
     'Le signal « valeur » est INACTIF tant qu’aucun seuil n’est démontré (valueThresholdDemonstrated = false) : sans seuil démontré, tout écart strictement positif serait déclaré « valeur », y compris le simple bruit de calcul d’un mélange dont le poids de modèle est nul.',
     'Les totaux de saison (équipes et joueurs) sont exclus de l’ajustement pour éviter toute fuite temporelle.',
     'L’échantillon couvre deux championnats (${p.metrics.league}) mais un seul jeu de paramètres : ceux-ci sont communs aux deux divisions.',
+${scaleValidationNote}
   ],
 };
 `;
