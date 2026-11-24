@@ -47,6 +47,13 @@ SLOW_TIMEOUT = float(os.environ.get("ESPN_SLOW_TIMEOUT", "30"))
 MAX_CONCURRENT = int(os.environ.get("ESPN_MAX_CONCURRENT", "4"))
 CACHE_TTL = float(os.environ.get("ESPN_CACHE_TTL", "600"))
 DAY_CACHE_TTL = float(os.environ.get("ESPN_DAY_CACHE_TTL", "300"))
+# Calendrier des competitions a phases (coupes d'Europe) : il ne change
+# qu'a l'approche d'une journee, une demi-journee de cache suffit.
+PHASE_CALENDAR_TTL = float(os.environ.get("ESPN_PHASE_CALENDAR_TTL", "43200"))
+# Une phase de coupe dure des semaines : elle est interrogee mois par
+# mois, et le nombre de mois est borne pour qu'une plage aberrante ne
+# declenche pas de balayage de plusieurs annees.
+_MAX_PHASE_MONTHS = 18
 # Les caches sont bornes en DUREE et en NOMBRE d'entrees : sans purge, ils
 # grossiraient indefiniment sur une instance qui vit longtemps (chaque
 # equipe, chaque journee, chaque saison est une cle).
@@ -73,6 +80,9 @@ def prune_cache(cache: Dict[str, Dict[str, Any]], ttl: float) -> None:
 _SEMAPHORES: Dict[Any, asyncio.Semaphore] = {}
 SCHEDULE_CACHE: Dict[str, Dict[str, Any]] = {}
 DAY_CACHE: Dict[str, Dict[str, Any]] = {}
+# Jours de match des competitions a phases (coupes d'Europe), deduits
+# de leurs plages ESPN : voir `phase_calendar`.
+PHASE_CALENDAR_CACHE: Dict[str, Dict[str, Any]] = {}
 
 # Catalogue des competitions exposees au front (calendrier). Le slug est
 # l'identifiant ESPN utilise par le scoreboard et les calendriers d'equipe.
@@ -98,6 +108,22 @@ LEAGUE_CATALOG: List[Dict[str, Any]] = [
     {"slug": "tur.1", "name": "Super Lig", "country": "Turquie", "tier": 1},
     {"slug": "mex.1", "name": "Liga MX", "country": "Mexique", "tier": 1},
     {"slug": "usa.1", "name": "MLS", "country": "Etats-Unis", "tier": 1},
+    # Coupes d'Europe : ce sont des competitions, pas des championnats
+    # nationaux. Leur calendrier ESPN est publie par PHASES (journee de
+    # ligue, barrages, 8es...) et non par journees : voir
+    # `season_calendar`, qui en deduit les jours de match.
+    {
+        "slug": "uefa.champions",
+        "name": "Ligue des Champions",
+        "country": "Europe",
+        "tier": 1,
+    },
+    {
+        "slug": "uefa.europa",
+        "name": "Ligue Europa",
+        "country": "Europe",
+        "tier": 2,
+    },
 ]
 
 # Slugs historiques acceptes en entree, reecrits vers le slug ESPN
@@ -269,6 +295,36 @@ async def fetch_day_scoreboard(
     return payload if isinstance(payload, dict) else {}
 
 
+def _phase_ranges(payload: Dict[str, Any]) -> List[Tuple[str, str]]:
+    """Plages de dates des phases de la competition (`calendar` ESPN).
+
+    Les coupes d'Europe (Ligue des Champions, Ligue Europa) ne publient
+    pas de liste de journees mais de PHASES : `entries` porte alors des
+    objets `{label, startDate, endDate}` (journee de ligue, barrages,
+    8es...). La plage est ramenee en dates compactes `AAAAMMJJ`.
+    """
+    leagues = payload.get("leagues") or []
+    if not leagues:
+        return []
+    ranges: List[Tuple[str, str]] = []
+    for group in leagues[0].get("calendar") or []:
+        entries = group.get("entries") if isinstance(group, dict) else None
+        for entry in entries or []:
+            if not isinstance(entry, dict):
+                continue
+            start = _compact_day(entry.get("startDate"))
+            end = _compact_day(entry.get("endDate")) or start
+            if start:
+                ranges.append((start, end or start))
+    return ranges
+
+
+def _compact_day(value: Any) -> str:
+    """Date ISO (`2026-08-27T07:00Z`) ramenee en `20260827`."""
+    day = str(value or "")[:10].replace("-", "")
+    return day if len(day) == 8 and day.isdigit() else ""
+
+
 def season_calendar(payload: Dict[str, Any]) -> List[str]:
     """Journees de la saison telles que publiees par ESPN.
 
@@ -278,6 +334,12 @@ def season_calendar(payload: Dict[str, Any]) -> List[str]:
     pendant plusieurs semaines, sans etre invalide. La calendrier
     permet de distinguer les deux cas — et de retrouver une journee qui
     a vraiment eu lieu.
+
+    Les competitions a phases (coupes d'Europe) publient des plages et
+    non des journees : la liste des jours « de match » est alors deduite
+    des phases (voir `_phase_ranges` et `phase_calendar`) plutot que de
+    renvoyer une liste vide, qui ferait passer la competition pour
+    cassee.
     """
     leagues = payload.get("leagues") or []
     if not leagues:
@@ -289,6 +351,120 @@ def season_calendar(payload: Dict[str, Any]) -> List[str]:
         if len(day) == 8 and day.isdigit():
             days.append(day)
     return sorted(set(days))
+
+
+def _months_in_range(start: str, end: str) -> List[str]:
+    """Mois civils (`AAAAMM`) couverts par une plage, bornes comprises."""
+    if end < start:
+        start, end = end, start
+    months: List[str] = []
+    year, month = int(start[:4]), int(start[4:6])
+    last = (int(end[:4]), int(end[4:6]))
+    while (year, month) <= last and len(months) < _MAX_PHASE_MONTHS:
+        months.append(f"{year}{month:02d}")
+        month += 1
+        if month == 13:
+            year, month = year + 1, 1
+    return months
+
+
+def _month_match_days(payload: Dict[str, Any]) -> List[str]:
+    """Jours qui portent un match dans la charge utile d'un mois.
+
+    `dates=202611` renvoie les seuls matchs du mois : les dates des
+    evenements sont donc directement les jours ou l'on joue.
+    """
+    days: List[str] = []
+    for event in payload.get("events") or []:
+        day = _compact_day(event.get("date"))
+        if day:
+            days.append(day)
+    return days
+
+
+async def _phase_match_days(
+    client: "httpx.AsyncClient", league: str, ranges: List[Tuple[str, str]]
+) -> List[str]:
+    """Jours de match reels a l'interieur des phases d'une competition.
+
+    ESPN ne publie pas de journees pour les coupes d'Europe, seulement
+    des phases (journee de ligue, barrages, 8es...). Chaque phase dure
+    des semaines : on interroge le scoreboard MOIS par MOIS sur les
+    mois couverts par les phases, puis on ne garde que les dates qui
+    portent reellement un match.
+
+    Le resultat se comporte comme un calendrier de championnat (trie,
+    sans doublon, journees deja jouees comprises), ce qui permet a
+    `/api/smoke` de valider la competition avec les memes regles.
+    """
+    months: List[str] = []
+    for start, end in ranges:
+        for month in _months_in_range(start, end):
+            if month not in months:
+                months.append(month)
+    days: List[str] = []
+    for month in months:
+        payload = await fetch_day_scoreboard(client, league, month)
+        days.extend(_month_match_days(payload))
+    return sorted(set(days))
+
+
+def _calendar_span(
+    ranges: List[Tuple[str, str]], today_compact: str
+) -> List[Tuple[str, str]]:
+    """Fenetre reellement utile du calendrier d'une competition.
+
+    Le calendrier sert a retrouver une journee DEJA JOUEE quand la
+    competition est entre deux rendez-vous : la fenetre va donc du
+    premier jour de la saison jusqu'au dernier, bornee a AUJOURD'HUI.
+    Les phases a venir n'ont pas besoin d'etre balayees : elles
+    n'apportent aucune journee deja jouee, et chaque mois interroge est
+    un appel ESPN.
+    """
+    span: List[Tuple[str, str]] = []
+    for start, end in ranges:
+        if start > today_compact:
+            continue
+        limited_end = min(end, today_compact)
+        span.append((start, limited_end))
+    return span
+
+
+async def phase_calendar(
+    client: "httpx.AsyncClient", league: str, payload: Dict[str, Any]
+) -> List[str]:
+    """Calendrier des competitions a phases : les jours ou l'on joue.
+
+    ESPN ne publie pas de journees pour les coupes d'Europe, seulement
+    des phases. On interroge le scoreboard mois par mois, uniquement
+    sur la fenetre deja ecoulee de la saison (`_calendar_span`), et on
+    ne conserve que les jours qui portent un match : la liste obtenue
+    se comporte comme un calendrier de championnat (triee, sans
+    doublon, journees deja jouees comprises).
+
+    Le resultat est mis en cache 12 h : il ne change qu'a l'approche
+    d'une journee, et le balayage coute plusieurs appels ESPN.
+    """
+    ranges = _phase_ranges(payload)
+    if not ranges:
+        return []
+    league = resolve_league_slug(league)
+    today_compact = datetime.now(timezone.utc).strftime("%Y%m%d")
+    span = _calendar_span(ranges, today_compact)
+    if not span:
+        return []
+    cache_key = f"{league}:phases:{today_compact}"
+    cached = PHASE_CALENDAR_CACHE.get(cache_key)
+    if cached and (time.time() - cached["at"]) < PHASE_CALENDAR_TTL:
+        return list(cached["days"])
+    days = await _phase_match_days(client, league, span)
+    # Une saison sans match encore joue (ete) : on ne memorise pas ce
+    # verdict, il changera des le premier coup d'envoi.
+    if days:
+        prune_cache(PHASE_CALENDAR_CACHE, PHASE_CALENDAR_TTL)
+        PHASE_CALENDAR_CACHE[cache_key] = {"at": time.time(), "days": days}
+    return days
+
 
 
 def _events_from_scoreboard(
@@ -338,14 +514,23 @@ async def fetch_day_matches(
 
 # --------------------------------------------------------------------------
 async def fetch_day_fixtures(
-    client: httpx.AsyncClient, league: str, date_compact: str
+    client: httpx.AsyncClient,
+    league: str,
+    date_compact: str,
+    _resolve_phases: bool = True,
 ) -> Dict[str, Any]:
     """Matchs d'une journee au format du front, avec cache court.
 
     Renvoie les matchs de la journee (`events`) et le calendrier de la
     saison (`calendar`, journees publiees par ESPN). Le calendrier
     accompagne le scoreboard dans la meme reponse ESPN : le servir ne
-    coute donc aucune requete supplementaire.
+    coute donc aucune requete supplementaire pour un championnat.
+
+    Les coupes d'Europe publient des PHASES et non des journees : quand
+    le calendrier ESPN est vide, leurs jours de match sont deduits des
+    plages de phases (`phase_calendar`, mise en cache 12 h). La
+    deduction est faite AVANT de poser l'entree de cache du jour, pour
+    qu'aucune reponse sans calendrier ne soit servie ensuite.
 
     Le cache est court (5 min) car les scores changent pendant la journee.
     """
@@ -356,6 +541,11 @@ async def fetch_day_fixtures(
         return cached["payload"]
 
     payload = await fetch_day_scoreboard(client, league, date_compact)
+    calendar = season_calendar(payload)
+    if not calendar and _resolve_phases:
+        # Championnat : `calendar` est deja la liste des journees.
+        # Competition a phases : on reconstitue les jours de match.
+        calendar = await phase_calendar(client, league, payload)
     events: List[Dict[str, Any]] = []
     for match in _events_from_scoreboard(payload, league):
         home = match.get("home") or {}
@@ -373,7 +563,7 @@ async def fetch_day_fixtures(
                 "completed": bool((match.get("status") or {}).get("completed")),
             }
         )
-    result = {"events": events, "calendar": season_calendar(payload)}
+    result = {"events": events, "calendar": calendar}
     prune_cache(DAY_CACHE, DAY_CACHE_TTL)
     DAY_CACHE[key] = {"at": time.time(), "payload": result}
     return result

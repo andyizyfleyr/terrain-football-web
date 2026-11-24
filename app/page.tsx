@@ -538,7 +538,7 @@ export default function Home() {
               <b>08</b> modules d’analyse
             </span>
             <span>
-              <b>16</b> compétitions
+              <b>{leagues.length || 18}</b> compétitions
             </span>
             <span className="estimateNote">
               <i /> estimations, jamais garanties

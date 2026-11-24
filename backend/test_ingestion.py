@@ -11,12 +11,17 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from espn import (  # noqa: E402
     _form_detail,
     _fraicheur,
+    _months_in_range,
     _overall_summary,
+    _phase_ranges,
     _side_summary,
     _stake_label,
     CACHE_MAX_ENTRIES,
+    fetch_day_fixtures,
     fetch_standings,
+    phase_calendar,
     prune_cache,
+    season_calendar,
     select_form,
 )
 
@@ -428,6 +433,158 @@ check(
     "les entrées encore valides sont conservées",
     len(fresh) == 1,
     f"{len(fresh)} entrée(s)",
+)
+
+print("")
+print("N. Calendrier des compétitions à phases (coupes d'Europe)")
+
+# Une coupe d'Europe ne publie pas de journées mais des PHASES :
+# `calendar` contient des objets {label, startDate, endDate}. Sans
+# traitement, la liste des journées restait vide et /api/smoke déclarait
+# la compétition cassée — alors qu'elle servait des matchs.
+
+PHASE_PAYLOAD = {
+    "leagues": [
+        {
+            "calendar": [
+                {
+                    "label": "UEFA Champions League",
+                    "entries": [
+                        {
+                            "label": "League Phase",
+                            "startDate": "2026-08-27T07:00Z",
+                            "endDate": "2027-02-15T07:59Z",
+                        },
+                        {
+                            "label": "Quarterfinals",
+                            "startDate": "2027-04-05T07:00Z",
+                            "endDate": "2027-04-26T06:59Z",
+                        },
+                    ],
+                }
+            ]
+        }
+    ]
+}
+
+ranges = _phase_ranges(PHASE_PAYLOAD)
+check("deux phases déduites", len(ranges) == 2, str(ranges))
+check("début de phase en date compacte", ranges[0][0] == "20260827", str(ranges[:1]))
+check("fin de phase en date compacte", ranges[0][1] == "20270215", str(ranges[:1]))
+check(
+    "un calendrier de championnat n'a pas de phases",
+    _phase_ranges({"leagues": [{"calendar": ["20260807", "20261121"]}]}) == [],
+    str(_phase_ranges({"leagues": [{"calendar": ["20260807"]}]})),
+)
+
+# Les phases sont couvertes MOIS par MOIS : un championnat à journées
+# ne doit pas être lu comme des phases, et les mois se suivent sans
+# trou ni doublon.
+months = _months_in_range("20260827", "20261103")
+check(
+    "mois couverts par une phase",
+    months == ["202608", "202609", "202610", "202611"],
+    str(months),
+)
+check(
+    "une plage d'un seul mois",
+    _months_in_range("20261103", "20261104") == ["202611"],
+    str(_months_in_range("20261103", "20261104")),
+)
+check(
+    "plage inversée remise dans l'ordre",
+    _months_in_range("20261103", "20260901") == ["202609", "202610", "202611"],
+    str(_months_in_range("20261103", "20260901")),
+)
+
+# `phase_calendar` interroge les mois des phases et ne retient que les
+# jours qui portent réellement un match (réponses ESPN simulées).
+class _FakeResponse:
+    def __init__(self, payload):
+        self.status_code = 200
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+class _FakeClient:
+    """Client httpx minimal : scoreboard mensuel simulé.
+
+    ESPN renvoie, pour `dates=202611`, les matchs du mois. Le faux
+    client reproduit ce contrat pour vérifier que `phase_calendar` ne
+    retient que les jours réellement joués.
+    """
+
+    def __init__(self, match_days):
+        self.match_days = sorted(match_days)
+        self.calls = []
+
+    async def get(self, url, timeout=None):
+        date_param = url.split("dates=")[1]
+        self.calls.append(date_param)
+        found = [day for day in self.match_days if day.startswith(date_param[:6])]
+        events = [{"date": f"{day[:4]}-{day[4:6]}-{day[6:8]}T20:00Z"} for day in found]
+        return _FakeResponse({"events": events, "leagues": [{"calendar": []}]})
+
+
+async def _phase_probe():
+    client = _FakeClient(match_days={"20261021", "20261104", "20261105"})
+    phase_payload = {
+        "leagues": [
+            {
+                "calendar": [
+                    {
+                        "entries": [
+                            {
+                                "label": "League Phase",
+                                "startDate": "2026-10-20T07:00Z",
+                                "endDate": "2026-11-05T07:59Z",
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+    return await phase_calendar(client, "uefa.champions", phase_payload), client
+
+
+phase_days, phase_client = asyncio.run(_phase_probe())
+check(
+    "seuls les jours avec match sont retenus",
+    phase_days == ["20261021", "20261104", "20261105"],
+    str(phase_days),
+)
+check(
+    "les mois de la phase sont interrogés",
+    phase_client.calls == ["202610", "202611"],
+    str(phase_client.calls),
+)
+
+# Le scoreboard d'un championnat continue de servir ses journées telles
+# quelles (aucune régression sur le calendrier « liste »).
+check(
+    "calendrier de championnat inchangé",
+    season_calendar({"leagues": [{"calendar": ["20260807", "20261121"]}]})
+    == ["20260807", "20261121"],
+    str(season_calendar({"leagues": [{"calendar": ["20260807", "20261121"]}]})),
+)
+# Un scoreboard mensuel porte les dates des matchs : c'est ce que
+# `_month_match_days` lit pour reconstruire les jours de match.
+check(
+    "jours de match lus dans un scoreboard mensuel",
+    __import__("espn")._month_match_days(
+        {
+            "events": [
+                {"date": "2026-11-04T20:00Z"},
+                {"date": "2026-11-25T17:45Z"},
+                {"date": "2026-11-25T20:00Z"},
+            ]
+        }
+    )
+    == ["20261104", "20261125", "20261125"],
+    "dates des événements",
 )
 
 print("")
