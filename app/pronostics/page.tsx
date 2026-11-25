@@ -703,13 +703,17 @@ export default function PredictionsPage() {
               </div>
               <ul className="predTopStats">
                 <li>
-                  <span>Confiance</span>
-                  <b>{topPick.confidence.score ?? '—'}/100</b>
-                </li>
-                <li>
-                  <span>Probabilité</span>
+                  <span>Réussite mesurée</span>
                   <b>{pct(topPick.confidence.probability)}</b>
                 </li>
+                {topPick.confidence.interval ? (
+                  <li>
+                    <span>Intervalle</span>
+                    <b>
+                      {pct(topPick.confidence.interval.low)}–{pct(topPick.confidence.interval.high)}
+                    </b>
+                  </li>
+                ) : null}
                 <li>
                   <span>Buts attendus</span>
                   <b>
