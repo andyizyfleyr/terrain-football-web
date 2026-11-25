@@ -1055,20 +1055,38 @@ export default function Home() {
                 <span className="bottomSheetGrabber" />
               </button>
               <div className="bottomSheetTopRow">
-                <button
-                  type="button"
-                  className="openFullPageLink"
-                  onClick={() => {
-                    const targetUrl = buildMatchUrl(league, mobileSheet.item.dayKey, mobileSheet.item.id);
-                    setMobileSheet(null);
-                    router.push(targetUrl);
-                  }}
-                >
-                  Page dédiée ↗
-                </button>
-                <button type="button" className="bottomSheetCloseBtn" onClick={closeMobileSheet} aria-label="Fermer">
-                  ✕ Fermer
-                </button>
+                <div className="bottomSheetTitle">
+                  <b>{currentLeagueName}</b>
+                  <small>Analyse de la rencontre</small>
+                </div>
+                <div className="bottomSheetActions">
+                  <button
+                    type="button"
+                    className="bottomSheetIconBtn"
+                    aria-label="Ouvrir la page dédiée de la rencontre"
+                    title="Page dédiée"
+                    onClick={() => {
+                      const targetUrl = buildMatchUrl(league, mobileSheet.item.dayKey, mobileSheet.item.id);
+                      setMobileSheet(null);
+                      router.push(targetUrl);
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path d="M14 4h6v6M20 4l-8.5 8.5M10 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-4" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    className="bottomSheetIconBtn bottomSheetIconBtnClose"
+                    onClick={closeMobileSheet}
+                    aria-label="Fermer l’analyse"
+                    title="Fermer"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path d="M6 6l12 12M18 6L6 18" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             </div>
             <div className="bottomSheetContent">
@@ -1078,6 +1096,7 @@ export default function Home() {
                 dayKey={mobileSheet.item.dayKey}
                 matchId={mobileSheet.item.id}
                 initialFixture={mobileSheet.item}
+                sheetMode
               />
             </div>
           </div>

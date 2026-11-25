@@ -6,7 +6,8 @@ import { Fixture, isFixtureFinished, longDate, Team, timeOf } from '../lib/terra
 import { TeamBadge } from './TeamBadge';
 import { AiAnalysisLoader, MIN_ANALYSIS_MS } from './AiAnalysisLoader';
 import { AnalystReportView } from './AnalystReportView';
-import { ProbBar } from './ProbBar';
+import { MatchProbabilities } from './MatchProbabilities';
+import { MatchOverview } from './MatchOverview';
 import { pronosticsMarketCount, PronosticsPanel } from './PronosticsPanel';
 
 export { TeamBadge };
@@ -140,6 +141,13 @@ type MatchAnalysisPanelProps = {
    * plutôt qu'inséré dans le panneau (feuille de la page d'accueil).
    */
   fullPageLoader?: boolean;
+  /**
+   * Contexte « feuille » (accueil mobile) : la feuille fournit déjà son
+   * chrome, donc le panneau n'affiche ni son titre ni son grand
+   * scoreboard — qu'il remplacerait par un rappel compact de la rencontre.
+   * Les actions (fermer, page dédiée) sont portées par l'en-tête unique.
+   */
+  sheetMode?: boolean;
 };
 
 export function MatchAnalysisPanel({
@@ -151,6 +159,7 @@ export function MatchAnalysisPanel({
   onClose,
   closeLabel = 'Retour aux rencontres',
   fullPageLoader = false,
+  sheetMode = false,
 }: MatchAnalysisPanelProps) {
   const [fixture, setFixture] = useState<Fixture | null>(initialFixture);
   const [fixtureLoading, setFixtureLoading] = useState(!initialFixture);
@@ -178,7 +187,28 @@ export function MatchAnalysisPanel({
     if (typeof window === 'undefined' || !window.matchMedia('(max-width: 760px)').matches) return;
     const el = panelRef.current;
     if (!el) return;
-    const top = el.getBoundingClientRect().top + window.scrollY - 4;
+    // Le panneau défile soit avec la page (fiche match), soit dans la
+    // feuille (`.bottomSheetContent`, qui est son propre conteneur de
+    // défilement). Remonter la page ne sert à rien dans le second cas :
+    // on cherche donc le premier ancêtre réellement défilable.
+    let scroller: HTMLElement | null = el.parentElement;
+    while (scroller) {
+      const style = window.getComputedStyle(scroller);
+      if (/(auto|scroll)/.test(`${style.overflowY}${style.overflow}`) && scroller.scrollHeight > scroller.clientHeight + 8) break;
+      scroller = scroller.parentElement;
+    }
+    // La barre d'onglets est collante : sans cette marge, le titre du
+    // nouvel onglet atterrit dessous, à moitié caché.
+    const sticky = panelRef.current?.querySelector<HTMLElement>('.analysisSticky');
+    const gap = (sticky?.getBoundingClientRect().height || 0) + 4;
+    if (scroller) {
+      // `offsetTop` est relatif à l'offsetParent, pas au conteneur
+      // défilant : on passe par des rectangles écran, toujours justes.
+      const delta = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      scroller.scrollTo({ top: Math.max(0, scroller.scrollTop + delta - gap), behavior: 'smooth' });
+      return;
+    }
+    const top = el.getBoundingClientRect().top + window.scrollY - gap;
     window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
   }, []);
 
@@ -348,14 +378,16 @@ export function MatchAnalysisPanel({
 
   return (
     <section
-      className="analysisPanel"
+      className={`analysisPanel ${sheetMode ? 'isSheet' : ''}`}
       id="analyse"
       ref={panelRef}
       style={{ ['--m-analysis-sticky' as any]: `${Math.round(stickyHeight)}px` }}
     >
-      {/* En-tête collant : score rapide + onglets, toujours visibles sur mobile */}
+      {/* En-tête collant : score rapide + onglets, toujours visibles sur mobile.
+          Dans la feuille, la barre de score est déjà dans l'en-tête de la
+          feuille : on ne la répète pas, seule la barre d'onglets reste. */}
       <div className="analysisSticky">
-        {fixture && (
+        {fixture && !sheetMode && (
           <div className="matchQuickBar">
             {onClose && (
               <button type="button" className="matchQuickBack" onClick={onClose} aria-label={closeLabel}>
@@ -379,12 +411,12 @@ export function MatchAnalysisPanel({
         {!showLoader && (
           <div className="analysisTabs" role="tablist" aria-label="Sections de l’analyse" ref={tabsRef}>
             {([
-              ['resume', 'Vue d’ensemble'],
-              ['pronostics', 'Pronostics'],
-              ['analyste', 'Analyste IA'],
-              ['facteurs', '8 facteurs'],
-              ['vigilance', 'Vigilance'],
-            ] as const).map(([id, label]) => (
+              ['resume', 'Aperçu', ''],
+              ['pronostics', 'Marchés', analyst?.pronostics ? String(pronosticsMarketCount(analyst.pronostics)) : ''],
+              ['analyste', 'Rapport IA', ''],
+              ['facteurs', 'Facteurs', String((homeAbsenceCount || 0) + (awayAbsenceCount || 0))],
+              ['vigilance', 'Vigilance', typeof vigilance.score === 'number' ? String(vigilance.score) : ''],
+            ] as const).map(([id, label, count]) => (
               <button
                 key={id}
                 role="tab"
@@ -392,17 +424,11 @@ export function MatchAnalysisPanel({
                 className={tab === id ? 'tabActive' : ''}
                 onClick={() => selectTab(id)}
               >
+                {id === 'vigilance' ? (
+                  <i className={vigilance.score >= 30 ? 'tabDotWarn' : ''} aria-hidden="true" />
+                ) : null}
                 {label}
-                {id === 'pronostics' && analyst?.pronostics ? (
-                  <small className="tabCountTag">
-                    {pronosticsMarketCount(analyst.pronostics)} marchés
-                  </small>
-                ) : null}
-                {id === 'analyste' && analyst ? <small className="tabCountTag">8 modules</small> : null}
-                {id === 'facteurs' && (homeAbsenceCount || awayAbsenceCount) ? (
-                  <small className="tabCountTag">{(homeAbsenceCount || 0) + (awayAbsenceCount || 0)} abs.</small>
-                ) : null}
-                {id === 'vigilance' && <i />}
+                {count && count !== '0' ? <small className="tabCountTag">{count}</small> : null}
               </button>
             ))}
           </div>
@@ -425,6 +451,46 @@ export function MatchAnalysisPanel({
 
       {fixture ? (
         <>
+          {sheetMode ? (
+            /* Feuille : un seul rappel compact de la rencontre. Le grand
+               scoreboard faisait doublon avec la barre de la feuille et
+               repoussait le verdict sous la ligne de flottaison. */
+            <div className="sheetMatchLine">
+              <div className="sheetMatchTop">
+                <span className="sheetMatchSide">
+                  <TeamBadge team={fixture.home} size={26} />
+                  <b>{fixture.home?.short || fixture.home?.name}</b>
+                </span>
+                <strong>
+                  {finished ? (
+                    <>
+                      {fixture.home?.score}
+                      <i>–</i>
+                      {fixture.away?.score}
+                    </>
+                  ) : (
+                    timeOf(fixture.date)
+                  )}
+                </strong>
+                <span className="sheetMatchSide sheetMatchSideAway">
+                  <b>{fixture.away?.short || fixture.away?.name}</b>
+                  <TeamBadge team={fixture.away} size={26} />
+                </span>
+              </div>
+              <div className="sheetMatchMeta">
+                <span>{longDate(dayKey)}</span>
+                {fixture.venue ? (
+                  <>
+                    <span>·</span>
+                    <span className="sheetMatchVenue">{fixture.venue}</span>
+                  </>
+                ) : null}
+                <span className={`matchStatusPill ${finished ? 'statusDone' : 'statusUpcoming'}`}>
+                  {finished ? 'Terminé' : 'À venir'}
+                </span>
+              </div>
+            </div>
+          ) : (
           <div className="matchHero">
             <div className="analysisMatchMeta">
               <span>{longDate(dayKey)}</span>
@@ -492,6 +558,7 @@ export function MatchAnalysisPanel({
               </div>
             )}
           </div>
+          )}
 
           {showLoader ? (
             <AiAnalysisLoader
@@ -518,6 +585,14 @@ export function MatchAnalysisPanel({
               )}
             </div>
           )}
+          {analysisError && sheetMode && (
+            <div className="analysisFallback">
+              <span>Le détail statistique n’est pas disponible pour cette rencontre.</span>
+              <button type="button" onClick={() => window.open(`/match/${leagueSlug}/${dayKey}/${matchId}`, '_self')}>
+                Ouvrir la fiche de la rencontre <span aria-hidden="true">↗</span>
+              </button>
+            </div>
+          )}
           {analysisDegraded && !analysisError && (
             <div className="dataWarning" role="status">
               Données partielles : certaines statistiques n’ont pas pu être collectées pour
@@ -526,252 +601,7 @@ export function MatchAnalysisPanel({
           )}
 
           {analysis && tab === 'resume' && (
-            <>
-              <div className="predictionIntro">
-                <div>
-                  <span className="sectionKicker">
-                    {analyst ? 'MOTEUR QUANTITATIF V3 · VALIDATION EMPIRIQUE' : 'MODÈLE STATISTIQUE ENRICHI'}
-                  </span>
-                  <h3>Estimations du match</h3>
-                  <small>
-                    Forme récente ({freshHome}/5 & {freshAway}/5 matchs)
-                    {analyst
-                      ? ' · score bivarié, covariance, répartition des périodes, Monte-Carlo 10 000'
-                      : fotmob
-                      ? ' · xG, effectifs & confrontations intégrés'
-                      : ' · sur 60 jours max'}
-                  </small>
-                </div>
-                <span className="modelMark">{analyst ? 'Bivarié + xG · V3' : fotmob ? 'Poisson + xG' : 'Poisson'}</span>
-              </div>
-              {analyst && (
-                <div className="analystStrip">
-                  <div className="analystStripScore">
-                    <span>SCORE ANALYSTE</span>
-                    <b>
-                      {analyst.confidence?.score ?? '—'}
-                      <small>/100</small>
-                    </b>
-                    <em>{analyst.confidence?.label || '—'}</em>
-                    <small className="analystStripBasis">complétude · séparation · accord</small>
-                    {typeof analyst.confidence?.probability === 'number' ? (
-                      <small className="analystStripMeasured">
-                        probabilité mesurée {Math.round(analyst.confidence.probability * 100)} %
-                        {analyst.confidence?.interval
-                          ? ` [${Math.round(analyst.confidence.interval.low * 100)}–${Math.round(
-                              analyst.confidence.interval.high * 100
-                            )} %]`
-                          : ''}
-                      </small>
-                    ) : null}
-                  </div>
-                  <div className="analystStripBody">
-                    <span className="sectionKicker">SYNTHÈSE DE L’ANALYSTE IA</span>
-                    <b>{analyst.synthesis?.headline}</b>
-                    <p>{analyst.synthesis?.text}</p>
-                    <div className="analystStripMeta">
-                      <span>λ {analyst.lambdas?.home} – {analyst.lambdas?.away}</span>
-                      <span>ρ {analyst.dixonColes?.rho}</span>
-                      {typeof analyst.covariance?.value === 'number' ? (
-                        <span>cov {analyst.covariance.value}</span>
-                      ) : null}
-                      {typeof analyst.periodSplit?.firstHalfShare === 'number' ? (
-                        <span>1re période {Math.round(analyst.periodSplit.firstHalfShare * 100)} %</span>
-                      ) : null}
-                      <span>MC 10 000</span>
-                      <span>temps pondéré e^(−ξΔt)</span>
-                    </div>
-                  </div>
-                  <button type="button" onClick={() => selectTab('analyste')}>
-                    Rapport complet <span>→</span>
-                  </button>
-                </div>
-              )}
-
-              {/* Étiquettes de la rencontre : elles résument ce que
-                  l'analyse mesure, avec la raison chiffrée de chacune. */}
-              {Array.isArray(analysis.tags) && analysis.tags.length > 0 && (
-                <div className="matchTagsPanel">
-                  <span className="sectionKicker">ÉTIQUETTES DE LA RENCONTRE</span>
-                  <div className="matchTagList">
-                    {analysis.tags.map((tag: any) => (
-                      <div key={tag.id} className={`matchTagRow matchTag_${String(tag.id).replace('-', '_')}`}>
-                        <span className="matchTagEmoji" aria-hidden="true">
-                          {tag.emoji}
-                        </span>
-                        <b>{tag.label}</b>
-                        <p>{tag.reason}</p>
-                      </div>
-                    ))}
-                  </div>
-                  {Array.isArray(analysis.tagWarnings) && analysis.tagWarnings.length > 0 && (
-                    <ul className="matchTagWarnings">
-                      {analysis.tagWarnings.map((warning: string, index: number) => (
-                        <li key={index}>{warning}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-
-              {(freshHome < 5 || freshAway < 5) && (
-                <div className="dataWarning">
-                  Échantillon récent incomplet. Les données plus anciennes sont exclues ; la confiance dans l’estimation est donc plus
-                  limitée.
-                </div>
-              )}
-
-              {/* Aperçu rapide des absents majeurs directement sur la vue d'ensemble */}
-              {(homeAbsenceCount !== null || awayAbsenceCount !== null) && ((homeAbsenceCount || 0) > 0 || (awayAbsenceCount || 0) > 0) && (
-                <div className="squadQuickBanner">
-                  <div className="squadQuickHeader">
-                    <span>✚ EFFECTIFS & ABSENCES</span>
-                    <button type="button" onClick={() => selectTab('facteurs')}>
-                      Voir les 8 facteurs →
-                    </button>
-                  </div>
-                  <div className="squadQuickCols">
-                    <div>
-                      <small>{fixture.home?.name}</small>
-                      <p>{factors.blessures?.home}</p>
-                    </div>
-                    <div>
-                      <small>{fixture.away?.name}</small>
-                      <p>{factors.blessures?.away}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="predictionGrid">
-                <article className="predictionCard">
-                  <div className="cardHeading">
-                    <span>1X2</span>
-                    <div>
-                      <b>Résultat final</b>
-                      <small>Temps réglementaire</small>
-                    </div>
-                  </div>
-                  <ProbBar
-                    label={`Victoire · ${fixture.home?.short || 'domicile'}`}
-                    value={probabilities.home}
-                    interval={analyst?.uncertainty?.home}
-                  />
-                  <ProbBar
-                    label="Match nul"
-                    value={probabilities.draw}
-                    color="var(--gold)"
-                    interval={analyst?.uncertainty?.draw}
-                  />
-                  <ProbBar
-                    label={`Victoire · ${fixture.away?.short || 'extérieur'}`}
-                    value={probabilities.away}
-                    color="var(--blue)"
-                    interval={analyst?.uncertainty?.away}
-                  />
-                </article>
-
-                <article className="predictionCard">
-                  <div className="cardHeading">
-                    <span>↗</span>
-                    <div>
-                      <b>Les deux équipes marquent</b>
-                      <small>BTTS · match entier</small>
-                    </div>
-                  </div>
-                  <ProbBar label="Oui · les deux équipes marquent" value={probabilities.bttsYes} />
-                  <ProbBar label="Non · une équipe muette" value={probabilities.bttsNo} color="var(--blue)" />
-                </article>
-
-                <article className="predictionCard">
-                  <div className="cardHeading">
-                    <span>Σ</span>
-                    <div>
-                      <b>Total de buts</b>
-                      <small>Plus / moins · match entier</small>
-                    </div>
-                  </div>
-                  <ProbBar label="Plus de 1,5 buts" value={probabilities.over15} />
-                  <ProbBar label="Moins de 1,5 buts" value={probabilities.under15} color="var(--blue)" />
-                  <ProbBar label="Plus de 2,5 buts" value={probabilities.over25} />
-                  <ProbBar label="Moins de 2,5 buts" value={probabilities.under25} color="var(--blue)" />
-                </article>
-
-                <article className="predictionCard">
-                  <div className="cardHeading">
-                    <span>⌗</span>
-                    <div>
-                      <b>Scores les plus probables</b>
-                      <small>Estimations du modèle</small>
-                    </div>
-                  </div>
-                  {(analysis.topScores || []).slice(0, 5).map((score: any) => (
-                    <ProbBar key={`${score.h}-${score.a}`} label={`${score.h} – ${score.a}`} value={score.p} />
-                  ))}
-                </article>
-
-                <article className="predictionCard fullPrediction">
-                  <div className="cardHeading">
-                    <span>½</span>
-                    <div>
-                      <b>Buts par période</b>
-                      <small>Probabilités par mi-temps</small>
-                    </div>
-                  </div>
-                  <div className="periodRows">
-                    {[
-                      ['1re mi-temps', probabilities.firstHalf],
-                      ['2e mi-temps', probabilities.secondHalf],
-                    ].map(([label, period]: any) => (
-                      <div className="periodGroup" key={label}>
-                        <span className="periodGroupLabel">{label}</span>
-                        {[
-                          ['1,5', period?.over15],
-                          ['2,5', period?.over25],
-                        ].map(([line, value]: any) => (
-                          <div key={line}>
-                            <ProbBar label={`Plus de ${line} buts`} value={value} />
-                            <ProbBar
-                              label={`Moins de ${line} buts`}
-                              value={typeof value === 'number' ? 1 - value : undefined}
-                              color="var(--blue)"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                  <small className="tableNote">Estimations par période, indépendantes du score à la pause.</small>
-                </article>
-              </div>
-
-              {Array.isArray(fotmob?.insights) && fotmob.insights.length > 0 && (
-                <div className="fotmobInsightsBox">
-                  <span className="sectionKicker">FAITS MARQUANTS</span>
-                  <ul>
-                    {fotmob.insights.slice(0, 4).map((line: string, i: number) => (
-                      <li key={i}>{line}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              <div className={`vigilanceSummary ${vigilance.score >= 30 ? 'vigilanceWarn' : ''}`}>
-                <span className="vigilanceIcon">!</span>
-                <div>
-                  <b>
-                    Vigilance · {vigilance.level || '—'} <small>{vigilance.score ?? '—'}/100</small>
-                  </b>
-                  <p>{vigilance.reasons?.[0] || 'Aucun signal majeur détecté avec les données disponibles.'}</p>
-                </div>
-                <button onClick={() => selectTab('vigilance')}>
-                  Détails <span>→</span>
-                </button>
-              </div>
-              <p className="legalNote">
-                Les probabilités sont des estimations statistiques. Elles ne constituent ni conseil de pari ni garantie de résultat.
-              </p>
-            </>
+            <MatchOverview analysis={analysis} analyst={analyst} fixture={fixture} onOpenTab={selectTab} />
           )}
 
           {analysis && tab === 'facteurs' && (
@@ -905,7 +735,43 @@ export function MatchAnalysisPanel({
             </div>
           )}
 
-          {analysis && tab === 'pronostics' && <PronosticsPanel analyst={analyst} />}
+          {analysis && tab === 'pronostics' && (
+            <div className="marketsArea">
+              <div className="detailHead">
+                <span className="sectionKicker">MOTEUR QUANTITATIF V3</span>
+                <h3>Probabilités du match</h3>
+                <p>
+                  Forme récente ({freshHome}/5 et {freshAway}/5 matchs)
+                  {analyst
+                    ? ' · score bivarié, covariance, répartition des périodes, Monte-Carlo 10 000'
+                    : fotmob
+                    ? ' · xG, effectifs et confrontations intégrés'
+                    : ' · sur 60 jours maximum'}
+                </p>
+                {analyst ? (
+                  <div className="detailMeta">
+                    <span>λ {analyst.lambdas?.home} – {analyst.lambdas?.away}</span>
+                    <span>ρ {analyst.dixonColes?.rho}</span>
+                    {typeof analyst.periodSplit?.firstHalfShare === 'number' ? (
+                      <span>1re période {Math.round(analyst.periodSplit.firstHalfShare * 100)} %</span>
+                    ) : null}
+                    <span>Monte-Carlo 10 000</span>
+                  </div>
+                ) : null}
+              </div>
+              <MatchProbabilities analysis={analysis} analyst={analyst} fixture={fixture} />
+              {(freshHome < 5 || freshAway < 5) && (
+                <div className="dataWarning">
+                  Échantillon récent incomplet. Les données plus anciennes sont exclues ; la confiance dans l’estimation est donc plus
+                  limitée.
+                </div>
+              )}
+              <PronosticsPanel analyst={analyst} />
+              <p className="legalNote">
+                Les probabilités sont des estimations statistiques. Elles ne constituent ni conseil de pari ni garantie de résultat.
+              </p>
+            </div>
+          )}
 
           {analysis && tab === 'analyste' && (
             <AnalystReportView analyst={analyst} meta={{ leagueName, leagueSlug }} />
