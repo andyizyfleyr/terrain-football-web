@@ -51,9 +51,21 @@ type AiAnalysisLoaderProps = {
   progress: number;
   dataReady: boolean;
   analyst?: any;
+  /**
+   * Couvre toute la page (calque fixe plein viewport) au lieu de
+   * s'insérer dans le panneau d'analyse. Utilisé par la fiche match.
+   */
+  fullPage?: boolean;
 };
 
-export function AiAnalysisLoader({ fixture, elapsed, progress, dataReady, analyst }: AiAnalysisLoaderProps) {
+export function AiAnalysisLoader({
+  fixture,
+  elapsed,
+  progress,
+  dataReady,
+  analyst,
+  fullPage = false,
+}: AiAnalysisLoaderProps) {
   const activeIndex = useMemo(() => {
     let idx = -1;
     for (let i = 0; i < ANALYSIS_STEPS.length; i++) {
@@ -83,9 +95,15 @@ export function AiAnalysisLoader({ fixture, elapsed, progress, dataReady, analys
     ];
   }, [analyst]);
 
+  // `fullPage` : le loader devient un calque fixe qui couvre TOUTE la page
+  // (en-tête, onglets, panneau), au lieu d'une carte insérée dans le
+  // panneau d'analyse. Le contenu réel reste monté derrière : il n'est que
+  // visuellement masqué, donc aucun état n'est perdu au dévoilement.
   return (
-    <div className="aiLoader">
+    <div className={`aiLoader ${fullPage ? 'aiLoaderFullPage' : ''}`} role="status" aria-live="polite">
+      {fullPage ? <div className="aiLoaderBackdrop" aria-hidden="true" /> : null}
       <div className="aiLoaderGlow" />
+      <div className={fullPage ? 'aiLoaderInner aiLoaderInnerCentered' : 'aiLoaderInner'}>
       <div className="aiLoaderHead">
         <span className="aiLoaderPulse">
           <i />
@@ -146,6 +164,7 @@ export function AiAnalysisLoader({ fixture, elapsed, progress, dataReady, analys
           ? 'Récupération finale des données de la rencontre…'
           : 'Traitement quantitatif en cours — aucune estimation n’est publiée avant la fin du calcul.'}
       </p>
+      </div>
     </div>
   );
 }

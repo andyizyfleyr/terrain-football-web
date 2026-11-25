@@ -135,6 +135,11 @@ type MatchAnalysisPanelProps = {
   initialFixture?: Fixture | null;
   onClose?: () => void;
   closeLabel?: string;
+  /**
+   * Affiche le chargeur d'analyse en calque plein écran (fiche match)
+   * plutôt qu'inséré dans le panneau (feuille de la page d'accueil).
+   */
+  fullPageLoader?: boolean;
 };
 
 export function MatchAnalysisPanel({
@@ -145,6 +150,7 @@ export function MatchAnalysisPanel({
   initialFixture = null,
   onClose,
   closeLabel = 'Retour aux rencontres',
+  fullPageLoader = false,
 }: MatchAnalysisPanelProps) {
   const [fixture, setFixture] = useState<Fixture | null>(initialFixture);
   const [fixtureLoading, setFixtureLoading] = useState(!initialFixture);
@@ -314,6 +320,27 @@ export function MatchAnalysisPanel({
   const showLoader = !(minElapsedReached && dataReady);
   const effectiveProgress = showLoader ? loaderProgress : 100;
 
+  // Plein écran : on masque le contenu de la page (en-tête, onglets,
+  // panneau) pendant l'attente. Le DOM reste intact : la récupération de
+  // données et l'état des onglets survivent au dévoilement.
+  useEffect(() => {
+    if (!fullPageLoader) return;
+    const show = showLoader;
+    document.body.classList.toggle('analysisLoadingBody', show);
+    // `inert` retire le contenu masqué du parcours clavier ET des
+    // lecteurs d'écran : sans lui, on tabulerait vers des liens que
+    // personne ne voit. `visibility:hidden` seul ne suffit pas toujours.
+    const shell = document.querySelector<HTMLElement>('.matchPageShell');
+    if (shell) {
+      if (show) shell.setAttribute('inert', '');
+      else shell.removeAttribute('inert');
+    }
+    return () => {
+      document.body.classList.remove('analysisLoadingBody');
+      shell?.removeAttribute('inert');
+    };
+  }, [fullPageLoader, showLoader]);
+
   const referee = factors.autres?.arbitre || fotmob?.referee || null;
   const coaches = factors.autres?.entraineurs || fotmob?.coaches || null;
   const homeAbsenceCount = Array.isArray(factors.blessures?.homePlayers) ? factors.blessures.homePlayers.length : null;
@@ -473,6 +500,7 @@ export function MatchAnalysisPanel({
               progress={effectiveProgress}
               dataReady={dataReady}
               analyst={analyst}
+              fullPage={fullPageLoader}
             />
           ) : (
             <>
@@ -926,6 +954,7 @@ export function MatchAnalysisPanel({
           progress={effectiveProgress}
           dataReady={dataReady}
           analyst={analyst}
+          fullPage={fullPageLoader}
         />
       ) : fixtureLoading ? (
         <div className="analysisLoading">

@@ -890,6 +890,69 @@
 }
 
 /* ================================================================== */
+/* CHARGEUR D'ANALYSE — CALQUE PLEIN ÉCRAN                             */
+/* ================================================================== */
+/* Le loader de la fiche match ne s'insère pas dans le panneau : il
+   couvre TOUTE la page. Le contenu réel reste monté derrière (il n'est
+   que visuellement masqué), donc rien n'est perdu au dévoilement. */
+.aiLoaderFullPage{
+  position:fixed;inset:0;z-index:60;margin:0;border-radius:0;
+  display:flex;align-items:center;justify-content:center;
+  padding:clamp(16px,4vh,48px);
+  overflow-y:auto;overflow-x:hidden;
+}
+/* Le fond du calque couvre réellement le viewport (le loader, lui, est
+   centré et peut défiler si l'écran est court). */
+.aiLoaderBackdrop{position:fixed;inset:0;z-index:-1;background:linear-gradient(160deg,#0a1d13,#123a26 58%,#08170f)}
+.aiLoaderInner{position:relative;width:100%}
+.aiLoaderInnerCentered{
+  max-width:680px;
+  max-height:100%;
+  overflow-y:auto;
+  margin:auto;
+  padding:22px 22px 18px;
+  border:1px solid #ffffff14;
+  border-radius:18px;
+  background:#0b2016cc;
+  box-shadow:0 30px 80px #00000059,inset 0 0 0 1px #ffffff0a;
+  scrollbar-width:thin;
+}
+.aiLoaderFullPage .aiLoaderGlow{position:fixed;top:-160px;right:-80px;width:min(560px,80vw);height:min(560px,80vw)}
+.aiLoaderFullPage .aiLoaderHead b{font-size:clamp(13px,1.5vw,16px);letter-spacing:2.4px}
+.aiLoaderFullPage .aiLoaderSteps{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 18px}
+.aiLoaderFullPage .aiLoaderTeams{margin:22px 0 16px}
+.aiLoaderFullPage .aiLoaderTeam .teamBadge{width:46px;height:46px}
+.aiLoaderFullPage .aiLoaderTeam b{max-width:190px;font-size:13px}
+.aiLoaderFullPage .aiLoaderPct{font-size:17px;padding:8px 12px}
+
+/* Pendant l'attente, le contenu de la page est masqué — mais gardé dans
+   le DOM et non interactif : la récupération de données continue.
+   `visibility` est appliqué à `body`, pas au shell : le calque vit DANS
+   le shell, et `visibility:hidden` se propage aux descendants (le
+   chargeur disparaissait avec le reste). */
+body.analysisLoadingBody{overflow:hidden;visibility:hidden}
+body.analysisLoadingBody .aiLoaderFullPage{visibility:visible}
+@media(max-width:760px){
+  .aiLoaderFullPage{padding:12px}
+  .aiLoaderInnerCentered{padding:16px 14px 13px;border-radius:14px}
+  .aiLoaderFullPage .aiLoaderSteps{grid-template-columns:1fr;gap:3px}
+  .aiLoaderFullPage .aiLoaderTeam b{max-width:110px;font-size:12px}
+  /* Le titre tient sur une ligne : sur deux lignes il poussait les
+     étapes sous la ligne de flottaison. */
+  .aiLoaderFullPage .aiLoaderHead b{font-size:11.5px;letter-spacing:1px;white-space:nowrap}
+  .aiLoaderFullPage .aiLoaderHead small{font-size:8px;letter-spacing:.35px}
+  .aiLoaderFullPage .aiLoaderPulse{width:30px;height:30px}
+  .aiLoaderFullPage .aiLoaderPct{font-size:14px;padding:6px 9px}
+  .aiLoaderFullPage .aiLoaderStep b{font-size:10px}
+  .aiLoaderFullPage .aiLoaderStep small{font-size:8px}
+  .aiLoaderFullPage .aiLoaderSteps{margin-top:10px}
+  .aiLoaderFullPage .aiLoaderFoot{font-size:8.5px}
+}
+@media(prefers-reduced-motion:reduce){
+  .aiLoaderFullPage .aiLoaderGlow,.aiLoaderFullPage .aiLoaderPulse:before,.aiLoaderFullPage .aiLoaderPulse:after{animation:none}
+}
+
+/* ================================================================== */
 /* BANDEAU DE SCORES — sticky, page d'accueil                          */
 /* ================================================================== */
 .tickerBar{position:sticky;top:var(--stickyTop,76px);z-index:14;display:flex;align-items:center;gap:10px;height:36px;margin:0 0 12px;padding:0 8px 0 0;overflow:hidden;border-radius:10px;background:#0e2a1c;color:#dcecdf}
