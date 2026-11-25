@@ -411,11 +411,14 @@ def _analyst(conf, home, draw, away):
             "probability": 0.58,
             "interval": {"low": 0.51, "high": 0.65},
         },
-        "sim": {"home": 0.48, "draw": 0.28, "away": 0.24},
         "lambdas": {"home": 1.6, "away": 1.1},
         "synthesis": {"headline": "H", "verdict": "V", "text": "T"},
         "disclosure": {"verdict": "équivalent", "headline": "D"},
-        "pronostics": {"halves": {"first": {}}, "teamGoals": {"home": {}}},
+        "pronostics": {
+            "sim": {"home": 0.48, "draw": 0.28, "away": 0.24},
+            "halves": {"first": {}},
+            "teamGoals": {"home": {}},
+        },
         # Champ volumineux : il ne doit PAS traverser la route.
         "modules": [{"blob": "x" * 500}],
         "tactics": {"home": {"profile": "p" * 500}},
@@ -427,7 +430,7 @@ async def fake_base_matches(league, date_compact, match_ids=None):
         raise RuntimeError("ingestion indisponible")
     if league == "mex.1":
         return []
-    return [
+    matches = [
         {
             "id": f"{league}-1",
             "date": f"{date_compact[:4]}-{date_compact[4:6]}-{date_compact[6:]}T18:00Z",
@@ -435,19 +438,39 @@ async def fake_base_matches(league, date_compact, match_ids=None):
             "away": {"name": "Beta", "short": "BET", "logo": ""},
         }
     ]
+    if league == "eng.1":
+        # Deux rencontres le même jour : c'est le cas qui révélait le bug
+        # « un seul match analysé par compétition ».
+        matches.append(
+            {
+                "id": f"{league}-2",
+                "date": f"{date_compact[:4]}-{date_compact[4:6]}-{date_compact[6:]}T20:00Z",
+                "home": {"name": "Gamma", "short": "GAM", "logo": ""},
+                "away": {"name": "Delta", "short": "DEL", "logo": ""},
+            }
+        )
+    return matches
+
+
+engine_calls = []
 
 
 async def fake_engine(client, league, date_compact, base):
+    # Le service d'analyse réel ne construit le rapport complet que pour
+    # UN match (`deepTeamFetch`). Le faux moteur reproduit ce contrat :
+    # poster toute la journée d'un coup ne renverrait qu'un match enrichi.
+    engine_calls.append((league, len(base)))
     conf = {"eng.1": 72, "esp.1": 91, "gre.1": 45}.get(league, 60)
     return (
         {
             "matches": [
                 {
-                    **match,
+                    **base[0],
                     "analyst": _analyst(conf, 0.5, 0.3, 0.2),
                 }
-                for match in base
             ]
+            if base
+            else []
         },
         None,
     )
@@ -469,8 +492,13 @@ def condense_with_gap(match):
 
 
 espn_module.condense_prediction = condense_with_gap
+espn_module_call_log = []
 with TestClient(api.app) as client:
     pred_payload = client.get("/api/predictions?date=2026-11-28").json()
+    # Appels moteur du PREMIER chargement : les requêtes suivantes du test
+    # (limite, filtre) repartent d'un cache froid et pollueraient le compte.
+    first_load_calls = list(engine_calls)
+    engine_calls.clear()
     limited_payload = client.get("/api/predictions?date=2026-11-28&limit=3").json()
     filtered_payload = client.get("/api/predictions?date=2026-11-28&leagues=eng.1,xyz.9").json()
 espn_module.build_base_matches = real_base
@@ -531,6 +559,28 @@ check(
     "pronostics : les blocs volumineux du moteur NE passent pas la route",
     all("modules" not in p and "tactics" not in p for p in preds),
     str(sorted(preds[0].keys())) if preds else "aucun",
+)
+check(
+    "pronostics : chaque rencontre est analysée (un appel moteur par match)",
+    bool(first_load_calls)
+    and all(size == 1 for _league, size in first_load_calls)
+    and sum(1 for league, _size in first_load_calls if league == "eng.1") == 2,
+    f"appels={first_load_calls}",
+)
+check(
+    "pronostics : deux matchs d’une même compétition donnent deux cartes",
+    sum(1 for p in preds if p["league"] == "eng.1") == 2,
+    str([p["matchId"] for p in preds if p["league"] == "eng.1"]),
+)
+check(
+    "pronostics : la distribution simulée accompagne chaque carte",
+    all(
+        isinstance(p["simulation"].get("home"), (int, float))
+        and isinstance(p["simulation"].get("draw"), (int, float))
+        and isinstance(p["simulation"].get("away"), (int, float))
+        for p in preds
+    ),
+    str(preds[0]["simulation"]) if preds else "aucun",
 )
 check(
     "pronostics : une compétition sans analyse est comptée, pas inventée",

@@ -157,6 +157,14 @@ function buildDayOptions(today: string, count = 5): DayOption[] {
 
 function PredictionCard({ prediction, dayKey }: { prediction: Prediction; dayKey: string }) {
   const tier = confidenceTier(prediction.confidence.score);
+  const pickKey = pickKeyOf(prediction);
+  // La confiance porte sur `pickKey` ; si la distribution calibrée pointe
+  // une AUTRE issue, la carte doit le dire plutôt que de laisser croire
+  // que le badge s'applique au segment le plus long de la barre.
+  const topCalibrated = (['home', 'draw', 'away'] as const).reduce((best, key) =>
+    prediction.probabilities[key] > prediction.probabilities[best] ? key : best
+  , 'home' as 'home' | 'draw' | 'away');
+  const divergence = topCalibrated !== pickKey;
   const { home, draw, away } = prediction.probabilities;
   const market = prediction.market;
   const hasOdds = Boolean(market?.odds?.home && market?.odds?.draw && market?.odds?.away);
@@ -225,6 +233,12 @@ function PredictionCard({ prediction, dayKey }: { prediction: Prediction; dayKey
       <div className="predVerdict">
         <span className="predPickLabel">Issue retenue</span>
         <b>{issueName(prediction, pickKeyOf(prediction))}</b>
+        {divergence ? (
+          <small className="predDiverge">
+            Le marché renverse l’ordre : la barre donne{' '}
+            {issueName(prediction, topCalibrated)} en tête.
+          </small>
+        ) : null}
         {prediction.confidence.probability !== null ? (
           <small>
             réussite mesurée <b className="predMeasured">{pct(prediction.confidence.probability)}</b>

@@ -810,6 +810,8 @@
 .predVerdict b{color:#14522f;font:800 12.5px 'DM Sans',sans-serif;letter-spacing:-.2px}
 .predVerdict small{color:#7e8c84;font-size:8.5px;line-height:1.4}
 .predVerdict small .predMeasured{color:#2f6b48;font-weight:700}
+/* Le marché a renversé l'ordre : signalé, jamais masqué. */
+.predDiverge{color:#8a5f19!important;font-weight:600}
 .predSynth{margin:0;color:#5c6c62;font-size:10px;line-height:1.5}
 .predSynth b{color:#3c5145;font-weight:700}
 .predFoot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:8px;border-top:1px solid #eef2ef}
