@@ -27,6 +27,7 @@ type FixturesAll = {
 
 type Row = {
   id: string;
+  state: 'pre' | 'in' | 'post';
   league: string;
   leagueName: string;
   homeName: string;
@@ -72,14 +73,18 @@ function toRow(event: TickerEvent): Row | null {
   const state = stateOf(event);
   const finished = state === 'post';
   const live = state === 'in';
+  const scored = state !== 'pre';
   return {
     id: String(event.id),
+    state,
     league: event.league || '',
     leagueName: event.leagueName || '',
     homeName: event.home.short || event.home.name,
     awayName: event.away.short || event.away.name,
-    homeScore: typeof event.home.score === 'number' ? event.home.score : null,
-    awayScore: typeof event.away.score === 'number' ? event.away.score : null,
+    // ESPN renvoie `score: 0` avant le coup d'envoi : afficher « 0 – 0 »
+    // pour un match qui n'a pas commencé serait un score inventé.
+    homeScore: scored && typeof event.home.score === 'number' ? event.home.score : null,
+    awayScore: scored && typeof event.away.score === 'number' ? event.away.score : null,
     clock: clockOf(event, state),
     live,
     finished,
@@ -195,6 +200,8 @@ export default function ScoreTicker() {
                 <em>
                   {row.homeScore !== null && row.awayScore !== null
                     ? `${row.homeScore} – ${row.awayScore}`
+                    : row.state === 'post'
+                    ? '—'
                     : 'vs'}
                 </em>
                 <b>{row.awayName}</b>

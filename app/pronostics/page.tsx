@@ -603,7 +603,7 @@ export default function PredictionsPage() {
           ) : loading ? (
             <div className="emptyState">
               <i className="largeSpinner" />
-              <b>Simulation de {dayTitle.toLowerCase()}</b>
+              <b>Simulation en cours</b>
               <span>
                 Le moteur simule chaque rencontre puis mesure sa confiance. Cela prend quelques
                 secondes pour {leagues.length || 23} compétitions.

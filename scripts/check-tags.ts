@@ -531,6 +531,12 @@ console.log('\nÉtiquettes de match — contrôles\n');
     'mention de divergence'
   );
   check(
+    'ticker : aucun score inventé avant le coup d’envoi',
+    tickerSource.includes("const scored = state !== 'pre'") &&
+      tickerSource.includes('homeScore: scored'),
+    'gardien sur les scores des matchs à venir'
+  );
+  check(
     'ticker : les états ESPN sont traduits (pre / in / post)',
     tickerSource.includes("=== 'in'") && tickerSource.includes("=== 'post'"),
     'mapping des états'
