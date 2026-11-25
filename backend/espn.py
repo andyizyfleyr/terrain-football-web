@@ -701,6 +701,8 @@ def condense_prediction(match: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     lambdas = analyst.get("lambdas") or {}
     disclosure = analyst.get("disclosure") or {}
     pronostics = analyst.get("pronostics") or {}
+    # Le moteur expose la distribution simulée sous `pronostics.sim`.
+    sim = pronostics.get("sim") or {}
 
     home = calibrated.get("home")
     draw = calibrated.get("draw")
@@ -727,11 +729,12 @@ def condense_prediction(match: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "venue": match.get("venue") or "",
         "probabilities": {"home": home, "draw": draw, "away": away},
         # Distribution de la SIMULATION, distincte de la distribution
-        # CALIBRÉE ci-dessus : la confiance porte sur la première.
+        # CALIBRÉE ci-dessus : la confiance porte sur la première. Elle
+        # vit dans `analyst.pronostics.sim`, pas à la racine du rapport.
         "simulation": {
-            "home": (analyst.get("sim") or {}).get("home"),
-            "draw": (analyst.get("sim") or {}).get("draw"),
-            "away": (analyst.get("sim") or {}).get("away"),
+            "home": (sim or {}).get("home"),
+            "draw": (sim or {}).get("draw"),
+            "away": (sim or {}).get("away"),
         },
         "pick": pick,
         "confidence": {
@@ -773,6 +776,40 @@ def condense_prediction(match: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
+async def _analyze_matches(
+    client: httpx.AsyncClient,
+    league: str,
+    date_compact: str,
+    base: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Fait analyser des matchs par le moteur, UN MATCH PAR APPEL.
+
+    Le service d'analyse ne construit le rapport complet que lorsqu'il
+    reçoit une seule rencontre (`deepTeamFetch`) : c'est ce mode qui
+    récupère effectifs, valeurs et compositions. Poster toute la journée
+    d'un coup ne renvoie donc qu'un seul match enrichi — les autres
+    n'ont pas de pronostic.
+
+    Les appels partent en parallèle ; une rencontre dont l'analyse échoue
+    est simplement absente du résultat (la page compte les « sans
+    analyse »), elle ne fait pas tomber la compétition.
+    """
+    from main import call_analysis_service  # import tardif : evite le cycle
+
+    async def one(match: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        try:
+            analysis, _error = await call_analysis_service(
+                client, league, date_compact, [match]
+            )
+        except Exception:
+            return None
+        matches = (analysis or {}).get("matches") or []
+        return matches[0] if matches else None
+
+    results = await asyncio.gather(*(one(match) for match in base))
+    return [match for match in results if match]
+
+
 async def fetch_day_predictions(
     client: httpx.AsyncClient,
     date_compact: str,
@@ -812,12 +849,7 @@ async def fetch_day_predictions(
         if not base:
             continue
         meta = league_meta(slug)
-        # Le moteur vit dans l'application web : on l'appelle depuis la
-        # même fabrique que `/api/analyze`, seule garante du contrat.
-        from main import call_analysis_service  # import tardif : evite le cycle
-
-        analysis, _error = await call_analysis_service(client, slug, date_compact, base)
-        matches = (analysis or {}).get("matches") or []
+        matches = await _analyze_matches(client, slug, date_compact, base)
         for match in matches:
             condensed = condense_prediction(match)
             if condensed is None:

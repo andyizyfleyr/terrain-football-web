@@ -526,6 +526,11 @@ console.log('\nÉtiquettes de match — contrôles\n');
     'état vide'
   );
   check(
+    'pronostics : un renversement de marché est signalé, pas masqué',
+    readFileSync(join(process.cwd(), 'app', 'pronostics', 'page.tsx'), 'utf-8').includes('predDiverge'),
+    'mention de divergence'
+  );
+  check(
     'ticker : les états ESPN sont traduits (pre / in / post)',
     tickerSource.includes("=== 'in'") && tickerSource.includes("=== 'post'"),
     'mapping des états'
