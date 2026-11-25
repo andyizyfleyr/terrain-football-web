@@ -544,6 +544,25 @@ console.log('8. Garde-fous du moteur');
     pickKey === simMax,
     `${pickKey} vs ${simMax} (sim ${simOf.home.toFixed(3)}/${simOf.draw.toFixed(3)}/${simOf.away.toFixed(3)})`
   );
+  // La distribution de la simulation doit voyager AVEC les pronostics :
+  // c'est elle que portent `pickKey`, `probability` et `interval`. Sans
+  // elle, la page ne peut afficher que des probabilités calibrées et la
+  // confiance se réfère à une distribution invisible.
+  const simBlock = (report.pronostics as any)?.sim;
+  check(
+    'moteur : la simulation est exposée dans les pronostics',
+    Boolean(simBlock) &&
+      ['home', 'draw', 'away'].every(key => typeof simBlock[key] === 'number'),
+    JSON.stringify(simBlock)
+  );
+  check(
+    'moteur : la simulation des pronostics est celle du rapport',
+    Boolean(simBlock) &&
+      simBlock.home === simOf.home &&
+      simBlock.draw === simOf.draw &&
+      simBlock.away === simOf.away,
+    `${JSON.stringify(simBlock)} vs ${JSON.stringify(simOf)}`
+  );
   check(
     'moteur : l’intervalle de confiance encadre la probabilité',
     report.confidence.interval.low <= report.confidence.probability &&
