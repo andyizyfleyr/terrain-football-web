@@ -270,6 +270,7 @@ export default function AllMatchesPage() {
         items={[
           { kind: 'link', href: '/', label: 'Rencontres' },
           { kind: 'current', label: 'Tous les matchs' },
+          { kind: 'link', href: '/pronostics', label: 'Pronostics' },
         ]}
         quickAction={{ href: '/', label: '← Rencontres' }}
       />

@@ -8,6 +8,8 @@
  *
  * Exécution : npm run check:tags
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   computeMatchTags,
   pickBadges,
@@ -445,6 +447,88 @@ console.log('\nÉtiquettes de match — contrôles\n');
     'la forme réelle de la production ne signale pas de piège sans signal',
     !ids(result.tags).includes('trap'),
     ids(result.tags).join(',')
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PAGE PRONOSTICS : invariants de transparence
+// ---------------------------------------------------------------------------
+{
+  const pagePath = join(process.cwd(), 'app', 'pronostics', 'page.tsx');
+  const cssPath = join(process.cwd(), 'app', 'globals.css');
+  const pageSource = readFileSync(pagePath, 'utf-8');
+  const cssSource = readFileSync(cssPath, 'utf-8');
+
+  // La page SportHub met en avant un SCORE EXACT (« Merseyside 1-2 City »).
+  // C'est le chiffre le plus visible et le moins fiable : la carte Terrain
+  // affiche les λ, sortie réelle du modèle.
+  check(
+    'pronostics : la carte affiche les λ, jamais un score exact prédit',
+    pageSource.includes('predLambda') && !/score\s*[α-ω]?prédit/i.test(pageSource),
+    'recherche de « score prédit »'
+  );
+  check(
+    'pronostics : la distribution est une barre à trois segments nommés',
+    ['predSegHome', 'predSegDraw', 'predSegAway'].every(cls => pageSource.includes(cls)),
+    'segments dom/nul/ext'
+  );
+  check(
+    'pronostics : le score de confiance est mesuré, pas décoratif',
+    pageSource.includes('confidence.probability') &&
+      pageSource.includes('confidence.interval'),
+    'probabilité mesurée + intervalle'
+  );
+  check(
+    'pronostics : aucun taux de réussite écrit à la main',
+    !/\b\d{2}\s*%\s*(de\s+)?(réussite|correct|accuracy)/i.test(pageSource),
+    'taux en dur'
+  );
+  check(
+    'pronostics : charte Terrain conservée (vert maison, pas la palette du modèle)',
+    cssSource.includes('--green') && !cssSource.includes('#097a41'),
+    'absence du vert #097a41 du template'
+  );
+  check(
+    'pronostics : le tableau de confiance ne repose pas sur la couleur seule',
+    pageSource.includes('TIER_LABEL') && pageSource.includes('aria-label'),
+    'libellés + rôles ARIA'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BANDEAU DE SCORES : accessible, respectueux de la réduction de mouvement
+// ---------------------------------------------------------------------------
+{
+  const tickerPath = join(process.cwd(), 'app', 'components', 'ScoreTicker.tsx');
+  const tickerSource = readFileSync(tickerPath, 'utf-8');
+  const cssSource = readFileSync(join(process.cwd(), 'app', 'globals.css'), 'utf-8');
+
+  check(
+    'ticker : défilement coupé si l’utilisateur réduit les animations',
+    cssSource.includes('prefers-reduced-motion') &&
+      /\.tickerRail\{animation:none\}/.test(cssSource.replace(/\s+/g, '')),
+    'règle reduced-motion'
+  );
+  check(
+    'ticker : le bandeau est masquable et correctement étiqueté',
+    tickerSource.includes('aria-label="Masquer le bandeau des scores"') &&
+      tickerSource.includes('aria-label="Scores du jour"'),
+    'rôles ARIA'
+  );
+  check(
+    'ticker : la seconde copie n’est pas dans l’ordre de tabulation',
+    tickerSource.includes("tabIndex={index < rows.length ? 0 : -1}"),
+    'tabindex conditionnel'
+  );
+  check(
+    'ticker : il disparaît quand aucune rencontre n’est disponible',
+    tickerSource.includes("status === 'empty'") && tickerSource.includes('return null'),
+    'état vide'
+  );
+  check(
+    'ticker : les états ESPN sont traduits (pre / in / post)',
+    tickerSource.includes("=== 'in'") && tickerSource.includes("=== 'post'"),
+    'mapping des états'
   );
 }
 

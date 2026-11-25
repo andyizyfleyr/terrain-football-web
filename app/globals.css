@@ -734,3 +734,207 @@
   .headerQuick{margin-left:auto;display:inline-flex;align-items:center;padding:7px 11px;border:1px solid #d9e9dd;border-radius:9px;background:#f4faf5;color:#2f7049;font:600 10.5px 'DM Sans',sans-serif;text-decoration:none;white-space:nowrap}
   .headerQuick:active{background:#e8f5eb}
 }
+
+/* ================================================================== */
+/* PAGE PRONOSTICS — sorties du modèle, confiance mesurée             */
+/* ================================================================== */
+.predIntro{padding:26px 0 16px}
+.predIntro .eyebrow{color:#4f8e64}
+.predIntro .eyebrow>span{background:#8ecaa0}
+.predIntro h1{margin:10px 0 6px;font-size:clamp(24px,3vw,31px);line-height:1.12;letter-spacing:-1.1px}
+.predIntro p{max-width:680px;margin:0;color:#7c8a81;font-size:12px;line-height:1.65}
+.predIntro p b{color:#4a5f52;font-weight:700}
+
+/* ---------- Mise en page : pronostics + colonne de contexte ---------- */
+.predLayout{display:grid;grid-template-columns:minmax(0,1fr) 322px;gap:16px;align-items:start}
+.predMain{min-width:0}
+.predSide{display:flex;flex-direction:column;gap:12px;position:sticky;top:calc(var(--stickyTop, 76px) + 12px)}
+.predHeader{flex-wrap:wrap;gap:12px;margin-bottom:4px}
+.predHeader h2{margin:5px 0 4px;font-size:19px;line-height:1.2;letter-spacing:-.45px;text-transform:capitalize}
+.predHeader p{margin:0;color:#89958d;font-size:10px;line-height:1.5}
+
+/* ---------- Filtres ---------- */
+.predFilters{display:flex;flex-direction:column;gap:8px;padding:10px 0 4px}
+.predFilters .leagueFilterBar{margin-top:0;border-top:0;padding:0}
+.leagueChipOn{border-color:var(--green);background:#eaf5ed;color:var(--green-dark)}
+.leagueChipOn b{background:#d6ebdd;color:var(--green-dark)}
+.predTiers{display:flex;flex-wrap:wrap;gap:6px}
+.predTierBtn{display:inline-flex;align-items:center;gap:5px;padding:5px 9px;border:1px solid #e3ebe5;border-radius:999px;background:#fff;color:#5d6d63;font:600 9px 'DM Sans',sans-serif;cursor:pointer;transition:.15s}
+.predTierBtn b{padding:1px 5px;border-radius:999px;background:#eef3ef;color:#6f7d73;font:700 8px 'DM Mono',monospace}
+.predTierBtn:hover{border-color:#bcd9c6}
+.predTierBtn-high{border-color:#cbe7d5}
+.predTierBtn-high.predTierBtnOn{border-color:#16804e;background:#eaf5ed;color:#115c3b}
+.predTierBtn-medium.predTierBtnOn{border-color:#d9a24a;background:#fdf6e8;color:#8a5f19}
+.predTierBtn-low.predTierBtnOn{border-color:#c3cdc6;background:#f2f5f3;color:#5a6660}
+
+/* ---------- Grille de cartes ---------- */
+.predGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:11px;padding-top:10px}
+
+/* ---------- Carte de pronostic ---------- */
+.predCard{display:flex;flex-direction:column;gap:10px;min-width:0;padding:13px 14px;border:1px solid #e6ece7;border-radius:14px;background:#fff;transition:border-color .16s,box-shadow .16s,transform .16s}
+.predCard:hover{border-color:#bcd9c6;box-shadow:0 6px 18px #173c260f;transform:translateY(-1px)}
+.predCard-high{box-shadow:inset 3px 0 #16804e}
+.predCard-medium{box-shadow:inset 3px 0 #d9a24a}
+.predCard-low{box-shadow:inset 3px 0 #c3cdc6}
+.predCardHead{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.predLeague{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#33473b;font:700 9.5px 'DM Sans',sans-serif}
+.predLeague small{color:#9aa59d;font:500 8.5px 'DM Mono',monospace}
+.predTier{display:inline-flex;align-items:center;gap:4px;flex:none;padding:3px 7px;border-radius:999px;font:700 8px 'DM Mono',monospace;letter-spacing:.3px;text-transform:uppercase}
+.predTier i{width:5px;height:5px;border-radius:50%;background:currentColor}
+.predTier-high{background:#eaf5ed;color:#115c3b}
+.predTier-medium{background:#fdf6e8;color:#8a5f19}
+.predTier-low{background:#f2f5f3;color:#5f6a64}
+
+.predTeams{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:8px}
+.predTeam{display:flex;flex-direction:column;gap:2px;min-width:0}
+.predTeamAway{text-align:right}
+.predTeamName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1f3329;font:700 12px 'DM Sans',sans-serif;letter-spacing:-.2px}
+.predLambda{color:#8d9a92;font:600 9px 'DM Mono',monospace}
+.predVs{display:flex;flex-direction:column;align-items:center;gap:1px}
+.predVs span{color:#9aa59d;font:600 9px 'DM Mono',monospace}
+.predVs b{color:#c2ccc5;font:800 9px 'DM Mono',monospace;letter-spacing:.5px}
+
+.predBar{display:flex;height:22px;overflow:hidden;border-radius:6px;background:#eef2ef}
+.predSeg{display:flex;align-items:center;justify-content:center;height:100%;transition:width .3s}
+.predSeg b{color:#fff;font:700 8.5px 'DM Mono',monospace;letter-spacing:-.2px}
+.predSegHome{background:#1c7d50}
+.predSegDraw{background:#9fb0a5}
+.predSegAway{background:#2d4b62}
+.predLegend{display:flex;margin-top:-4px;color:#98a29c;font:500 8px 'DM Mono',monospace}
+.predLegend span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.predLegend span:nth-child(2){text-align:center;color:#7d8a82}
+.predLegend span:last-child{text-align:right}
+
+.predVerdict{display:flex;flex-direction:column;gap:1px;padding:8px 10px;border:1px solid #e7eee9;border-radius:9px;background:#f7fbf8}
+.predPickLabel{color:#8d9a92;font:600 7.5px 'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase}
+.predVerdict b{color:#14522f;font:800 12.5px 'DM Sans',sans-serif;letter-spacing:-.2px}
+.predVerdict small{color:#7e8c84;font-size:8.5px;line-height:1.4}
+.predVerdict small .predMeasured{color:#2f6b48;font-weight:700}
+.predSynth{margin:0;color:#5c6c62;font-size:10px;line-height:1.5}
+.predSynth b{color:#3c5145;font-weight:700}
+.predFoot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:8px;border-top:1px solid #eef2ef}
+.predOdds{min-width:0;color:#5d6d63;font:600 9.5px 'DM Mono',monospace}
+.predOdds small{margin-right:4px;color:#9aa59d;font-size:8px;letter-spacing:.5px;text-transform:uppercase}
+.predOdds em{color:#a2ada6;font:500 9px 'DM Sans',sans-serif;font-style:normal}
+.predOpen{flex:none;padding:5px 9px;border:1px solid #d9e9dd;border-radius:8px;background:#f4faf5;color:#2f7049;font:600 9px 'DM Sans',sans-serif;text-decoration:none;white-space:nowrap;transition:.15s}
+.predOpen:hover{background:#e8f5eb;border-color:#b8d7c2}
+
+/* ---------- Panneaux de la colonne de contexte ---------- */
+.predPanel{padding:14px;border:1px solid #e1e8e2;border-radius:14px;background:#fff;box-shadow:var(--shadow)}
+.predPanelHead{display:flex;flex-direction:column;gap:2px;margin-bottom:10px}
+.predPanelHead b{margin-top:6px;color:var(--green);font:800 32px 'DM Mono',monospace;letter-spacing:-1.5px;line-height:1}
+.predPanelHead small{color:#8d9a92;font:500 9px 'DM Mono',monospace;letter-spacing:.4px}
+.predQualityNote{margin:0 0 10px;color:#6d7b72;font-size:10px;line-height:1.5}
+.predQualityNote b{color:#3c5145}
+.predQualityList{display:flex;flex-direction:column;gap:1px;margin:0 0 10px;padding:0;list-style:none}
+.predQualityList li{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:baseline;gap:2px 8px;padding:6px 0;border-bottom:1px solid #f0f4f1}
+.predQualityList li:last-child{border-bottom:0}
+.predQualityList span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#5c6c62;font-size:9.5px}
+.predQualityList b{color:#2d4536;font:700 11px 'DM Mono',monospace}
+.predQualityList small{grid-column:1/-1;color:#a0aaa4;font:500 8px 'DM Mono',monospace}
+.predQualityList .predQualityRef b{color:var(--green)}
+.predQualityFoot{margin:0;padding-top:9px;border-top:1px solid #eef2ef;color:#8d9a92;font-size:8.5px;line-height:1.5}
+
+.predTopLeague{margin:0 0 8px;color:#8d9a92;font:600 8px 'DM Mono',monospace;letter-spacing:.8px;text-transform:uppercase}
+.predTopTeams{display:flex;flex-direction:column;gap:1px}
+.predTopTeams b{color:#1f3329;font:800 14px 'DM Sans',sans-serif;letter-spacing:-.4px}
+.predTopTeams span{color:#b0bab3;font:600 8px 'DM Mono',monospace;text-transform:uppercase}
+.predTopPick{display:flex;flex-direction:column;gap:1px;margin:10px 0;padding:8px 10px;border-radius:9px;background:#eef7f1}
+.predTopPick span{color:#8d9a92;font:600 7.5px 'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase}
+.predTopPick b{color:#14522f;font:800 13px 'DM Sans',sans-serif}
+.predTopStats{display:flex;flex-direction:column;gap:1px;margin:0 0 9px;padding:0;list-style:none}
+.predTopStats li{display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid #f0f4f1;font-size:9.5px}
+.predTopStats li:last-child{border-bottom:0}
+.predTopStats span{color:#7d8a82}
+.predTopStats b{color:#2d4536;font:700 10px 'DM Mono',monospace}
+.predTopText{margin:0;color:#6d7b72;font-size:9.5px;line-height:1.5}
+
+.predHowList{display:flex;flex-direction:column;gap:9px;margin:0 0 10px;padding:0;list-style:none;counter-reset:how}
+.predHowList li{display:flex;flex-direction:column;gap:1px;padding-left:20px;position:relative;counter-increment:how}
+.predHowList li:before{content:counter(how);position:absolute;left:0;top:1px;width:14px;height:14px;display:grid;place-items:center;border-radius:5px;background:#eef7f1;color:#2f7049;font:700 8px 'DM Mono',monospace}
+.predHowList b{color:#33473b;font-size:10px}
+.predHowList span{color:#7d8a82;font-size:9px;line-height:1.45}
+.predHowFootnote{margin:0;padding-top:9px;border-top:1px solid #eef2ef;color:#98a29c;font-size:8.5px;line-height:1.5}
+
+/* ---------- Responsive ---------- */
+@media(max-width:1200px){
+  .predLayout{grid-template-columns:1fr}
+  .predSide{position:static;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+}
+@media(max-width:760px){
+  .predIntro{padding:18px 2px 12px}
+  .predIntro h1{font-size:24px}
+  .predIntro p{font-size:11px}
+  .predGrid{grid-template-columns:1fr;gap:9px}
+  .predHeader h2{font-size:17px}
+  .predSide{display:flex}
+  .predCard{padding:12px}
+  .predTeamName{font-size:11.5px}
+  .predPanel{padding:13px}
+
+  /* Sur mobile, la liste des compétitions occupe sinon toute la hauteur
+     avant la première carte : un seul rang qui défile horizontalement. */
+  .predFilters .leagueFilterBar{
+    flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;
+    padding-bottom:6px;margin:0 -12px;padding-left:12px;padding-right:12px;
+    scrollbar-width:none;-webkit-overflow-scrolling:touch;
+    scroll-snap-type:x proximity;
+  }
+  .predFilters .leagueFilterBar::-webkit-scrollbar{display:none}
+  .predFilters .leagueFilterBar .leagueChip{flex:none;scroll-snap-align:start}
+  .predTiers{overflow-x:auto;flex-wrap:nowrap;padding-bottom:4px;margin:0 -12px;padding-left:12px;padding-right:12px;scrollbar-width:none}
+  .predTiers::-webkit-scrollbar{display:none}
+  .predTierBtn{flex:none}
+}
+
+/* ================================================================== */
+/* BANDEAU DE SCORES — sticky, page d'accueil                          */
+/* ================================================================== */
+.tickerBar{position:sticky;top:var(--stickyTop,76px);z-index:14;display:flex;align-items:center;gap:10px;height:36px;margin:0 0 12px;padding:0 8px 0 0;overflow:hidden;border-radius:10px;background:#0e2a1c;color:#dcecdf}
+/* L'en-tête a un fond translucide : le bandeau doit rester lisible quand
+   les cartes défilent dessous. */
+.tickerBar{box-shadow:0 6px 16px #0e2a1c26}
+/* Le collage du bandeau impose de décaler les ancres de la page : sans
+   cela, un lien vers #rencontres place le titre SOUS l'en-tête + bandeau. */
+html:has(.tickerBar){scroll-padding-top:124px}
+.tickerLead{display:flex;align-items:center;gap:6px;flex:0 0 auto;height:100%;padding:0 12px;white-space:nowrap;background:#123a26;border-right:1px solid #1d4a33;color:#eaf6ee;font:700 9px 'DM Sans',sans-serif;letter-spacing:.4px;text-transform:uppercase}
+.tickerDot{width:6px;height:6px;flex:none;border-radius:50%;background:#6f8a7a}
+.tickerDotLive{background:#44e07a;box-shadow:0 0 0 3px #44e07a26;animation:tickerPulse 2s ease-in-out infinite}
+@keyframes tickerPulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+.tickerTrack{flex:1;min-width:0;overflow:hidden;-webkit-mask-image:linear-gradient(90deg,transparent,#000 24px,#000 calc(100% - 24px),transparent);mask-image:linear-gradient(90deg,transparent,#000 24px,#000 calc(100% - 24px),transparent)}
+.tickerRail{display:flex;align-items:center;gap:0;width:max-content;animation:tickerScroll var(--tickerDuration,90s) linear infinite}
+.tickerBar:hover .tickerRail,.tickerBar:focus-within .tickerRail{animation-play-state:paused}
+@keyframes tickerScroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+
+.tickerItem{display:inline-flex;align-items:center;gap:8px;padding:0 12px;height:36px;border-right:1px solid #1a3f2b;color:#cfe3d6;text-decoration:none;font:500 10px 'DM Sans',sans-serif;white-space:nowrap;transition:background .15s}
+.tickerItem:hover,.tickerItem:focus-visible{background:#16452e}
+.tickerLeague{max-width:110px;overflow:hidden;text-overflow:ellipsis;color:#8fbba0;font:600 8px 'DM Mono',monospace;letter-spacing:.3px;text-transform:uppercase}
+.tickerScore{display:inline-flex;align-items:center;gap:6px;color:#eaf6ee;font-weight:600}
+.tickerScore b{font-weight:600}
+.tickerScore em{min-width:30px;padding:1px 5px;border-radius:4px;background:#1b4b32;color:#fff;font:700 9px 'DM Mono',monospace;font-style:normal;text-align:center;letter-spacing:.2px}
+.tickerItemLive .tickerScore em{background:#2b7f4d}
+.tickerClock{color:#7fa78e;font:600 8.5px 'DM Mono',monospace}
+/* Espace de respiration entre la fin d'une copie et le début de l'autre. */
+.tickerBreak{display:block;width:28px;height:1px;flex:none}
+.tickerClockLive{color:#57e08a}
+.tickerClose{flex:none;display:grid;place-items:center;width:20px;height:20px;padding:0;border:0;border-radius:6px;background:#1a3f2b;color:#9ec0a9;font-size:13px;line-height:1;cursor:pointer;transition:.15s}
+.tickerClose:hover{background:#23553a;color:#eaf6ee}
+
+/* Sur mobile, la barre de filtres collante (`.mSticky`) occupe le haut :
+   le bandeau reste en flux au-dessus d'elle pour ne pas la recouvrir. */
+@media(max-width:760px){
+  .tickerBar{position:relative;top:auto;height:32px;margin-bottom:10px;border-radius:8px}
+  .tickerLead{height:32px;padding:0 9px;font-size:8px}
+  .tickerLead span{display:none}
+  .tickerItem{height:32px;gap:6px;padding:0 9px}
+  .tickerLeague{max-width:74px;font-size:7px}
+  .tickerScore{font-size:9px}
+  .tickerScore em{min-width:26px;font-size:8px}
+  .tickerClock{font-size:7.5px}
+  .tickerRail{--tickerDuration:60s}
+}
+@media(prefers-reduced-motion:reduce){
+  .tickerRail{animation:none}
+  .tickerDotLive{animation:none}
+}

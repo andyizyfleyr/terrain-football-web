@@ -393,6 +393,174 @@ check(
     str([e["date"] for e in all_payload.get("events", [])][:3]),
 )
 
+print("6 ter. Pronostics de la journée (/api/predictions)")
+
+
+def _analyst(conf, home, draw, away):
+    return {
+        "market": {
+            "available": True,
+            "calibrated": {"home": home, "draw": draw, "away": away},
+            "odds": {"home": 2.1, "draw": 3.4, "away": 3.5},
+            "value": {"pick": "home", "edge": 0.02},
+        },
+        "confidence": {
+            "score": conf,
+            "label": "Solide",
+            "pickKey": "home",
+            "probability": 0.58,
+            "interval": {"low": 0.51, "high": 0.65},
+        },
+        "sim": {"home": 0.48, "draw": 0.28, "away": 0.24},
+        "lambdas": {"home": 1.6, "away": 1.1},
+        "synthesis": {"headline": "H", "verdict": "V", "text": "T"},
+        "disclosure": {"verdict": "équivalent", "headline": "D"},
+        "pronostics": {"halves": {"first": {}}, "teamGoals": {"home": {}}},
+        # Champ volumineux : il ne doit PAS traverser la route.
+        "modules": [{"blob": "x" * 500}],
+        "tactics": {"home": {"profile": "p" * 500}},
+    }
+
+
+async def fake_base_matches(league, date_compact, match_ids=None):
+    if league == "nor.1":
+        raise RuntimeError("ingestion indisponible")
+    if league == "mex.1":
+        return []
+    return [
+        {
+            "id": f"{league}-1",
+            "date": f"{date_compact[:4]}-{date_compact[4:6]}-{date_compact[6:]}T18:00Z",
+            "home": {"name": "Alpha", "short": "ALP", "logo": ""},
+            "away": {"name": "Beta", "short": "BET", "logo": ""},
+        }
+    ]
+
+
+async def fake_engine(client, league, date_compact, base):
+    conf = {"eng.1": 72, "esp.1": 91, "gre.1": 45}.get(league, 60)
+    return (
+        {
+            "matches": [
+                {
+                    **match,
+                    "analyst": _analyst(conf, 0.5, 0.3, 0.2),
+                }
+                for match in base
+            ]
+        },
+        None,
+    )
+
+
+real_base = espn_module.build_base_matches
+real_engine = api_mod.call_analysis_service
+espn_module.build_base_matches = fake_base_matches
+api_mod.call_analysis_service = fake_engine
+espn_module.main = api_mod
+# Une compétition sans analyse : doit être comptée, pas inventée.
+orig_condense = espn_module.condense_prediction
+
+
+def condense_with_gap(match):
+    if match.get("id", "").startswith("gre.1"):
+        return None
+    return orig_condense(match)
+
+
+espn_module.condense_prediction = condense_with_gap
+with TestClient(api.app) as client:
+    pred_payload = client.get("/api/predictions?date=2026-11-28").json()
+    limited_payload = client.get("/api/predictions?date=2026-11-28&limit=3").json()
+    filtered_payload = client.get("/api/predictions?date=2026-11-28&leagues=eng.1,xyz.9").json()
+espn_module.build_base_matches = real_base
+api_mod.call_analysis_service = real_engine
+espn_module.condense_prediction = orig_condense
+
+preds = pred_payload.get("predictions", [])
+check(
+    "pronostics : les pronostics sont produits",
+    bool(preds),
+    str(pred_payload)[:160],
+)
+check(
+    "pronostics : triés par confiance décroissante",
+    [p["confidence"]["score"] for p in preds]
+    == sorted((p["confidence"]["score"] for p in preds), reverse=True),
+    str([p["confidence"]["score"] for p in preds])[:80],
+)
+check(
+    "pronostics : la distribution 1X2 est exposée",
+    bool(preds)
+    and all(
+        p["probabilities"]["home"] + p["probabilities"]["draw"] + p["probabilities"]["away"]
+        > 0.99
+        for p in preds
+    ),
+    str(preds[0]["probabilities"]) if preds else "aucun",
+)
+check(
+    "pronostics : l'issue retenue correspond à la probabilité la plus haute",
+    all(
+        p["pick"]
+        == max(p["probabilities"], key=lambda k: p["probabilities"][k])
+        for p in preds
+    ),
+    str([p["pick"] for p in preds][:5]),
+)
+check(
+    "pronostics : la confiance mesurée et son intervalle passent",
+    bool(preds)
+    and preds[0]["confidence"]["probability"] is not None
+    and preds[0]["confidence"]["interval"] is not None,
+    str(preds[0]["confidence"]) if preds else "aucun",
+)
+check(
+    "pronostics : la confiance désigne l'issue de la SIMULATION, pas le max calibré",
+    bool(preds)
+    and all(p["confidence"]["pickKey"] == "home" for p in preds)
+    and all(p["simulation"]["home"] is not None for p in preds),
+    str([(p["confidence"]["pickKey"], p["pick"], p["simulation"]) for p in preds][:2]),
+)
+check(
+    "pronostics : le verdict de transparence accompagne chaque carte",
+    all(p["disclosure"].get("verdict") for p in preds),
+    str([p["disclosure"] for p in preds][:2]),
+)
+check(
+    "pronostics : les blocs volumineux du moteur NE passent pas la route",
+    all("modules" not in p and "tactics" not in p for p in preds),
+    str(sorted(preds[0].keys())) if preds else "aucun",
+)
+check(
+    "pronostics : une compétition sans analyse est comptée, pas inventée",
+    pred_payload.get("withoutAnalysis", 0) >= 1
+    and all(p["league"] != "gre.1" for p in preds),
+    f"withoutAnalysis={pred_payload.get('withoutAnalysis')}",
+)
+check(
+    "pronostics : une ingestion en panne est signalée sans casser la réponse",
+    pred_payload.get("failed") == ["nor.1"],
+    str(pred_payload.get("failed")),
+)
+check(
+    "pronostics : la limite est respectée",
+    limited_payload.get("shown") == 3
+    and len(limited_payload.get("predictions", [])) == 3
+    and limited_payload.get("total", 0) > 3,
+    f"shown={limited_payload.get('shown')} total={limited_payload.get('total')}",
+)
+check(
+    "pronostics : filtre de compétitions + slug inconnu ignoré",
+    {p["league"] for p in filtered_payload.get("predictions", [])} == {"eng.1"},
+    str({p["league"] for p in filtered_payload.get("predictions", [])}),
+)
+check(
+    "pronostics : le poids de la réponse reste léger",
+    len(str(pred_payload)) < 20000,
+    f"{len(str(pred_payload))} caractères pour {len(preds)} pronostics",
+)
+
 print("7. Auto-contrôle de production (/api/smoke)")
 
 

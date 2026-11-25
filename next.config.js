@@ -11,6 +11,10 @@ const nextConfig = {
   // route répondrait 404 en production alors qu'elle fonctionne en local.
   outputFileTracingIncludes: {
     '/api/markets/validation': ['./data/markets-validation.json'],
+    // La page Pronostics affiche la précision MESURÉE du modèle : sans le
+    // rapport de backtest dans le bundle, la route répondrait 404 en
+    // production et le bloc de transparence disparaîtrait.
+    '/api/model-quality': ['./data/backtest-report.json'],
   },
 };
 module.exports = nextConfig;

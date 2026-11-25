@@ -12,6 +12,8 @@
  *
  * Exécution : npm run check:model
  */
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   applySharpness,
   bivariatePmf,
@@ -524,6 +526,30 @@ console.log('8. Garde-fous du moteur');
   check('moteur : λ dans une plage plausible', report.lambdas.home > 0.2 && report.lambdas.home < 4);
   check('moteur : intervalle de crédibilité fourni', report.uncertainty.home.low < report.uncertainty.home.high);
   check('moteur : confiance mesurée fournie', report.confidence.probability > 0 && report.confidence.probability < 1);
+  // La confiance porte sur l'issue de la SIMULATION. Sans ce champ, une
+  // interface qui affiche la distribution calibrée accolerait la confiance
+  // à une autre issue : le pick doit être nommé, et être un maximum de `sim`.
+  const simOf = report.simulation as { home: number; draw: number; away: number };
+  const pickKey = report.confidence.pickKey;
+  const simMax = (['home', 'draw', 'away'] as const).reduce((best, key) =>
+    simOf[key] > simOf[best] ? key : best
+  , 'home' as 'home' | 'draw' | 'away');
+  check(
+    'moteur : la confiance nomme l’issue de la simulation',
+    ['home', 'draw', 'away'].includes(pickKey),
+    pickKey
+  );
+  check(
+    'moteur : la confiance porte sur le maximum de la simulation',
+    pickKey === simMax,
+    `${pickKey} vs ${simMax} (sim ${simOf.home.toFixed(3)}/${simOf.draw.toFixed(3)}/${simOf.away.toFixed(3)})`
+  );
+  check(
+    'moteur : l’intervalle de confiance encadre la probabilité',
+    report.confidence.interval.low <= report.confidence.probability &&
+      report.confidence.probability <= report.confidence.interval.high,
+    `${report.confidence.interval.low} ≤ ${report.confidence.probability} ≤ ${report.confidence.interval.high}`
+  );
   check('moteur : bloc calibration présent', report.calibration.modelWeight >= 0 && report.calibration.modelWeight <= 1);
 
   // Robustesse aux données manquantes (ESPN / FotMob indisponibles) :
@@ -1009,6 +1035,65 @@ console.log('10. Identité de championnat (collecte)');
   check('date : cle compacte = cle ISO', longDate('20261122') === longDate('2026-11-22'));
   check('date : cle invalide neutralisee', parseDayKey('pas-une-date') === null && longDate('pas-une-date') === '');
   check('date : jour de la semaine en francais', longDate('2026-11-22').startsWith('dimanche'));
+}
+
+// ---------------------------------------------------------------------------
+// QUALITÉ MESURÉE : le bloc « ce que vaut le modèle » ne peut afficher
+// qu'un chiffre issu du backtest réel. Un rapport absent doit produire
+// une absence de chiffre, jamais un chiffre par défaut.
+// ---------------------------------------------------------------------------
+{
+  const reportPath = join(process.cwd(), 'data', 'backtest-report.json');
+  check('qualité : le rapport de backtest est présent', existsSync(reportPath), reportPath);
+
+  if (existsSync(reportPath)) {
+    const raw = JSON.parse(readFileSync(reportPath, 'utf-8'));
+    const reports: any[] = raw?.global?.reports || [];
+
+    // Le libellé et la valeur affichés par la page viennent du même
+    // rapport : on vérifie qu'il existe un « modèle calibré » et que sa
+    // précision est bien dans une plage crédible (jamais 0,73 inventé).
+    const calibrated = reports.find(entry => /calibré/i.test(String(entry.name)));
+    const market = reports.find(entry => /marché|Pinnacle/i.test(String(entry.name)));
+    const chance = reports.find(entry => /aléatoire/i.test(String(entry.name)));
+
+    check(
+      'qualité : le rapport nomme le modèle calibré',
+      Boolean(calibrated),
+      reports.map(entry => entry.name).join(' | ')
+    );
+    check(
+      'qualité : la précision du modèle reste dans une plage mesurable',
+      Boolean(calibrated) &&
+        calibrated.accuracy.value > 0.3 &&
+        calibrated.accuracy.value < 0.7,
+      `${calibrated?.accuracy?.value}`
+    );
+    check(
+      'qualité : le modèle battu par le hasard serait détecté',
+      Boolean(calibrated) && Boolean(chance) && calibrated.accuracy.value > chance.accuracy.value,
+      `${calibrated?.accuracy?.value} > ${chance?.accuracy?.value}`
+    );
+    check(
+      'qualité : la référence de marché est publiée à côté du modèle',
+      Boolean(market),
+      market ? `${market.name} ${market.accuracy.value}` : 'absente'
+    );
+    check(
+      'qualité : le chiffre affiché est celui du rapport, pas une constante',
+      Boolean(calibrated) && calibrated.accuracy.samples === raw.dataset.matches,
+      `${calibrated?.accuracy?.samples} vs ${raw.dataset?.matches}`
+    );
+  }
+
+  // Aucun fichier ne doit coder un taux de réussite en dur dans l'interface :
+  // c'est la garantie qu'un chiffre affiché vient du backtest.
+  const pageSource = readFileSync(join(process.cwd(), 'app', 'pronostics', 'page.tsx'), 'utf-8');
+  check(
+    'qualité : la page Pronostics n’invente aucun taux de réussite',
+    !/\b(73|81|64|69)\s*%/.test(pageSource),
+    'taux en dur détectés'
+  );
 }
 
 console.log('');
