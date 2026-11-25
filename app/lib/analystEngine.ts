@@ -630,6 +630,13 @@ export type AnalystReport = {
     halfTimeFullTime: Record<string, number>;
     /** Équipe qui n'encaisse pas de but. */
     cleanSheet: { home: number; away: number };
+    /**
+     * Distribution 1X2 de la SIMULATION (et non du mélange calibré) :
+     * c'est elle que portent `confidence.pickKey`, `probability` et
+     * `interval`. Sans elle, une interface qui affiche les probabilités
+     * calibrées ne peut pas montrer l'issue réellement évaluée.
+     */
+    sim: { home: number; draw: number; away: number };
     note: string;
   };
   synthesis: { headline: string; verdict: string; bullets: string[]; text: string };
@@ -2422,6 +2429,11 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
     cleanSheet: {
       home: round(derived.cleanSheet.home, 4),
       away: round(derived.cleanSheet.away, 4),
+    },
+    sim: {
+      home: round(sim.home, 4),
+      draw: round(sim.draw, 4),
+      away: round(sim.away, 4),
     },
     note:
       `Tous ces pronostics sont issus de la même simulation minute par minute (${mc.runs.toLocaleString('fr-FR')} itérations) que le résultat final : ils sont cohérents entre eux et avec le score prédit.`,
