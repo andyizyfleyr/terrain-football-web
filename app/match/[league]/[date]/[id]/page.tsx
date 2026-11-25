@@ -70,6 +70,7 @@ export default function MatchAnalysisPage() {
           matchId={matchId}
           onClose={handleBack}
           closeLabel="Retour à la liste des matchs"
+          fullPageLoader
         />
       </div>
 

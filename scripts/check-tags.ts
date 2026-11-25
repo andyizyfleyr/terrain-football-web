@@ -543,6 +543,72 @@ console.log('\nÉtiquettes de match — contrôles\n');
   );
 }
 
+// ---------------------------------------------------------------------------
+// CHARGEUR PLEIN ÉCRAN : il couvre la page, sans casser la visibilité
+// ---------------------------------------------------------------------------
+{
+  const loaderSource = readFileSync(
+    join(process.cwd(), 'app', 'components', 'AiAnalysisLoader.tsx'),
+    'utf-8'
+  );
+  const panelSource = readFileSync(
+    join(process.cwd(), 'app', 'components', 'MatchAnalysisPanel.tsx'),
+    'utf-8'
+  );
+  const matchPageSource = readFileSync(
+    join(process.cwd(), 'app', 'match', '[league]', '[date]', '[id]', 'page.tsx'),
+    'utf-8'
+  );
+  const cssSource = readFileSync(join(process.cwd(), 'app', 'globals.css'), 'utf-8');
+  const compactCss = cssSource.replace(/\s+/g, '');
+
+  check(
+    'chargeur : la fiche match demande le mode plein écran',
+    matchPageSource.includes('fullPageLoader'),
+    'prop sur la page match'
+  );
+  check(
+    'chargeur : le calque est fixe et couvre le viewport',
+    /\.aiLoaderFullPage\{position:fixed;inset:0;/.test(compactCss),
+    'règle position/inset'
+  );
+  // Régression vécue : `visibility:hidden` posé sur le shell (parent du
+  // calque) se propage aux descendants et efface le chargeur lui-même.
+  check(
+    'chargeur : le masquage ne s’applique pas au shell qui contient le calque',
+    !/body\.analysisLoadingBody \.matchPageShell\{visibility:hidden\}/.test(compactCss) &&
+      /body\.analysisLoadingBody\{overflow:hidden;visibility:hidden\}/.test(compactCss),
+    'masquage porté par body + calque re-visible'
+  );
+  check(
+    'chargeur : le calque redevient visible sous le corps masqué',
+    compactCss.includes('body.analysisLoadingBody.aiLoaderFullPage{visibility:visible}') ||
+      compactCss.includes('body.analysisLoadingBody .aiLoaderFullPage{visibility:visible}'),
+    'règle de ré-affichage'
+  );
+  check(
+    'chargeur : le contenu masqué sort du parcours clavier et lecteur d’écran',
+    panelSource.includes("setAttribute('inert'") &&
+      panelSource.includes("removeAttribute('inert')"),
+    'inert pendant le chargement'
+  );
+  check(
+    'chargeur : la classe du corps est retirée au démontage',
+    panelSource.includes("document.body.classList.remove('analysisLoadingBody')"),
+    'nettoyage'
+  );
+  check(
+    'chargeur : le plein écran n’est pas imposé à la feuille d’accueil',
+    !readFileSync(join(process.cwd(), 'app', 'page.tsx'), 'utf-8').includes('fullPageLoader'),
+    'la feuille garde le loader inséré'
+  );
+  check(
+    'chargeur : annoncé aux lecteurs d’écran (status, live)',
+    loaderSource.includes('role="status"') && loaderSource.includes('aria-live="polite"'),
+    'rôles ARIA'
+  );
+}
+
 console.log('');
 if (failures) {
   console.log(`✗ ${failures} contrôle(s) en échec\n`);
