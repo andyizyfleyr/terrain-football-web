@@ -46,10 +46,18 @@
 /* Bottom Sheet Mobile */
 .bottomSheetBackdrop{position:fixed;inset:0;z-index:80;background:rgba(15,30,22,.48);backdrop-filter:blur(4px);display:flex;align-items:flex-end;justify-content:center;animation:sheetFadeIn .18s ease-out}
 .bottomSheetSheet{width:100%;max-width:760px;max-height:90dvh;display:flex;flex-direction:column;background:#fff;border-radius:20px 20px 0 0;box-shadow:0 -14px 40px rgba(12,32,20,.26);overflow:hidden;animation:sheetSlideUp .24s cubic-bezier(.22,1,.36,1)}
-.bottomSheetHeader{flex:none;padding:6px 14px 8px;border-bottom:1px solid #e9efea;background:#fbfdfb}
+.bottomSheetHeader{flex:none;padding:6px 14px 9px;border-bottom:1px solid #e9efea;background:#fbfdfb}
 .bottomSheetGrabberBtn{width:100%;display:grid;place-items:center;padding:4px 0 6px;border:0;background:none;cursor:pointer}
 .bottomSheetGrabber{width:42px;height:4px;border-radius:999px;background:#cfd9d2}
 .bottomSheetTopRow{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.bottomSheetTitle{min-width:0}
+.bottomSheetTitle b{display:block;overflow:hidden;font-size:12px;letter-spacing:-.15px;white-space:nowrap;text-overflow:ellipsis}
+.bottomSheetTitle small{display:block;margin-top:1px;color:#8d9a92;font:500 9px 'DM Mono',monospace;letter-spacing:.6px;text-transform:uppercase}
+.bottomSheetActions{display:flex;flex:none;align-items:center;gap:6px}
+.bottomSheetIconBtn{width:34px;height:34px;display:grid;place-items:center;padding:0;border:1px solid #e3ebe5;border-radius:9px;background:#fff;color:#4f6156;cursor:pointer}
+.bottomSheetIconBtn svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.bottomSheetIconBtn:hover{background:#f1f7f3;color:#256b43}
+.bottomSheetIconBtnClose:hover{background:#fdf1f1;border-color:#f0d9d9;color:#b2503f}
 .openFullPageLink{color:#3c7552;text-decoration:none;font:600 10px 'DM Mono',monospace;padding:5px 9px;border:1px solid #daece0;border-radius:7px;background:#eef6f0;cursor:pointer}
 .bottomSheetCloseBtn{padding:5px 10px;border:1px solid #e3ebe5;border-radius:8px;background:#fff;color:#4f6156;font:600 11px 'DM Sans',sans-serif;cursor:pointer}
 .bottomSheetContent{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding-bottom:env(safe-area-inset-bottom,16px)}
@@ -1003,3 +1011,170 @@ html:has(.tickerBar){scroll-padding-top:124px}
   .tickerRail{animation:none}
   .tickerDotLive{animation:none}
 }
+
+/* ------------------------------------------------------------------ */
+/* APERÇU DE LA RENCONTRE — onglet d'ouverture de l'analyse            */
+/* ------------------------------------------------------------------ */
+/* L'aperçu répond à trois questions en un écran : qui est favori, avec
+   quelle confiance mesurée, et quels signaux peuvent contredire le
+   modèle. Le détail chiffré vit dans « Détail » et « Pronostics » : rien
+   n'est affiché deux fois dans la feuille. */
+.matchOverview{padding:0 0 6px}
+
+/* Verdict ---------------------------------------------------------- */
+.verdictCard{margin:13px 19px 12px;padding:14px;border:1px solid #dbe9df;border-radius:13px;background:linear-gradient(140deg,#f4faf6,#fdfefd 70%)}
+.verdictTop{display:grid;grid-template-columns:96px minmax(0,1fr);gap:14px;align-items:start}
+.verdictScore{text-align:center;padding:8px 8px 9px;border-radius:11px;background:#fff;border:1px solid #e3eee6}
+.verdictScore>span{display:block;color:#8b9890;font:600 7.5px 'DM Mono',monospace;letter-spacing:.7px}
+.verdictScore>b{display:block;margin:4px 0 3px;color:var(--green);font:800 32px 'DM Mono',monospace;line-height:1}
+.verdictScore>b small{color:#93a199;font-size:11px}
+.verdictScore>em{display:inline-block;padding:3px 9px;border-radius:999px;background:#e6f3ea;color:#2f6f4b;font:600 9px 'DM Sans',sans-serif;font-style:normal}
+.verdictCopy h3{margin:4px 0 5px;color:#22382b;font-size:15px;line-height:1.3;letter-spacing:-.3px}
+.verdictCopy p{margin:0;color:#6b7a70;font-size:11px;line-height:1.5}
+.verdictBullets{margin:8px 0 0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:5px}
+.verdictBullets li{padding:4px 8px;border-radius:999px;background:#eef6f0;color:#386b4d;font-size:9.5px;line-height:1.3}
+.verdictOutcome{margin-top:12px}
+.outcomeBar{display:flex;height:9px;overflow:hidden;border-radius:999px;background:#edf1ed}
+.outcomeBar i{display:block;height:100%}
+.outcomeHome{background:var(--green)}
+.outcomeDraw{background:var(--gold)}
+.outcomeAway{background:var(--blue)}
+.outcomeLegend{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-top:6px}
+.outcomeLegend>span{display:flex;flex-direction:column;gap:1px;min-width:0}
+.outcomeLegendDraw{text-align:center}
+.outcomeLegendAway{text-align:right}
+.outcomeLegend b{overflow:hidden;color:#4d5f54;font-size:10px;font-weight:600;white-space:nowrap;text-overflow:ellipsis}
+.outcomeLegend em{color:#2d6b49;font:700 13px 'DM Mono',monospace;font-style:normal}
+.outcomeLegendDraw em{color:#a6771f}
+.outcomeLegendAway em{color:#3f6b96}
+.verdictCta{width:100%;min-height:40px;margin-top:12px;border:1px solid #cfe3d6;border-radius:10px;background:#fff;color:#256b43;font:600 11.5px 'DM Sans',sans-serif;cursor:pointer}
+.verdictCta:hover{background:#eff8f2}
+.verdictCta span{margin-left:4px}
+
+/* Chiffres clés ---------------------------------------------------- */
+.keyFigures{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;margin:0 19px 10px;overflow:hidden;border:1px solid #e5ece7;border-radius:12px;background:#e9efe9}
+.keyFigure{padding:10px 9px;background:#fff}
+.keyFigure>span{display:block;color:#93a099;font:600 7px 'DM Mono',monospace;letter-spacing:.5px}
+.keyFigure>b{display:block;margin:4px 0 2px;color:#22382b;font:700 14px 'DM Mono',monospace;line-height:1.15}
+.keyFigure>b i{font-style:normal;color:#b3bdb6}
+.keyFigure>small{display:block;color:#93a099;font-size:8px;line-height:1.35}
+.confidenceNote{margin:0 19px 12px;color:#7d8981;font-size:9.5px;line-height:1.5}
+.confidenceNote b{color:#2f6b4a;font-family:'DM Mono',monospace}
+
+/* Signaux ---------------------------------------------------------- */
+.overviewSignals{margin:0 19px 12px;padding:11px 12px;border:1px solid #f0e2c9;border-radius:11px;background:#fffaf1}
+.overviewSectionHead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}
+.overviewSectionHead .sectionKicker{color:#a8761f}
+.overviewSectionHead button{border:0;background:none;color:#a8761f;font:600 9.5px 'DM Sans',sans-serif;cursor:pointer;white-space:nowrap}
+.signalRows{display:grid;gap:7px}
+.signalRow{display:flex;align-items:flex-start;gap:8px}
+.signalIcon{width:20px;height:20px;display:grid;place-items:center;flex:none;border-radius:50%;background:#eaf3ec;color:#3c7a55;font-size:10px;font-weight:800}
+.signalIconWarn{background:#f7e8cd;color:#a77020}
+.signalRow b{display:block;color:#4a5b50;font-size:10.5px}
+.signalRow p{margin:2px 0 0;color:#7c8a81;font-size:9.5px;line-height:1.45}
+
+/* Faits marquants -------------------------------------------------- */
+.overviewFacts{margin:0 19px 12px;padding:11px 12px;border:1px solid #e5ece7;border-radius:11px;background:#f8fbf9}
+.overviewFacts ul{margin:6px 0 0;padding:0;list-style:none;display:grid;gap:5px}
+.overviewFacts li{position:relative;padding-left:13px;color:#5c6d62;font-size:10px;line-height:1.45}
+.overviewFacts li:before{position:absolute;left:0;top:6px;width:5px;height:5px;border-radius:50%;background:#8fc0a2;content:''}
+
+/* Raccourcis ------------------------------------------------------- */
+.overviewActions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:0 19px 10px}
+.overviewActions button{display:block;padding:10px 9px;border:1px solid #e2eae4;border-radius:10px;background:#fff;text-align:left;cursor:pointer}
+.overviewActions button:hover{border-color:#beddc8;background:#f7fcf8}
+.overviewActions b{display:block;color:#2b4a37;font-size:10.5px}
+.overviewActions small{display:block;margin-top:2px;color:#93a099;font-size:8.5px;line-height:1.35}
+
+.overviewMeta{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin:0 19px 10px;color:#9aa49e;font:8px 'DM Mono',monospace}
+.overviewFullPage{display:block;width:calc(100% - 38px);min-height:38px;margin:0 19px 12px;border:1px solid #daece0;border-radius:9px;background:#eef6f0;color:#31704c;font:600 10.5px 'DM Sans',sans-serif;cursor:pointer}
+
+/* Marchés ---------------------------------------------------------- */
+.marketsArea{padding:14px 0 4px}
+.detailArea{padding:14px 0 4px}
+.detailHead{padding:0 19px 11px}
+.detailHead h3{margin:4px 0 0;font-size:16px;letter-spacing:-.35px}
+.detailHead p{margin:4px 0 0;color:#8e9a92;font-size:9.5px;line-height:1.5}
+.detailMeta{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.detailMeta span{padding:3px 7px;border-radius:5px;background:#eef6f0;color:#3a7450;font:500 8px 'DM Mono',monospace}
+
+/* Rappel compact de la rencontre (mode feuille) --------------------- */
+/* Deux lignes, chacune avec sa mission : équipes + heure, puis date et
+   lieu. Sur une seule ligne, les noms d'équipes et la date se
+   tronquaient tous les deux. */
+.sheetMatchLine{padding:9px 13px 10px;border-bottom:1px solid #e9efea;background:#f7fbf8}
+.sheetMatchTop{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:8px}
+.sheetMatchSide{display:flex;align-items:center;gap:7px;min-width:0}
+.sheetMatchSideAway{justify-content:flex-end;text-align:right}
+.sheetMatchSide b{min-width:0;overflow:hidden;font-size:13px;font-weight:700;letter-spacing:-.15px;white-space:nowrap;text-overflow:ellipsis}
+.sheetMatchTop>strong{flex:none;padding:4px 10px;border:1px solid #e1eae4;border-radius:8px;background:#fff;color:#1f3a2a;font:700 12.5px 'DM Mono',monospace;white-space:nowrap}
+.sheetMatchTop>strong i{margin:0 2px;color:#b3bdb6;font-style:normal}
+.sheetMatchMeta{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:5px;margin-top:6px;color:#8b9890;font:8px 'DM Mono',monospace}
+.sheetMatchVenue{max-width:120px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+
+/* Barre d'onglets : cinq colonnes égales, partout où le panneau est
+   étroit. Les libellés « 16 marchés » débordaient de l'écran ; en mode
+   feuille, les compteurs sont même retirés (ils restent dans les
+   raccourcis de l'aperçu). */
+.analysisTabs button>i{margin-right:5px;margin-left:0}
+.analysisTabs button>i.tabDotWarn{width:6px;height:6px;background:#dba448}
+.tabCountTag{background:#eef3ef;color:#7d8b82}
+
+/* La grille ne s'applique QUE dans la feuille : sur la fiche match
+   mobile, les pastilles gardent leur défilement horizontal (les serrer
+   sur 5 colonnes coupait les libellés en « Ap… », « Ma… »). */
+.isSheet .analysisTabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;padding:7px 9px;overflow:visible;-webkit-mask-image:none;mask-image:none}
+.isSheet .analysisTabs button{min-width:0;overflow:hidden;padding:7px 4px;font-size:10px;letter-spacing:-.25px;white-space:nowrap;text-overflow:ellipsis}
+.isSheet .analysisTabs button>i{width:4px;height:4px;margin-right:3px}
+.isSheet .analysisSticky{border-radius:0}
+.isSheet .analysisTabs{overflow:visible}
+.isSheet .tabCountTag{display:none}
+.isSheet .analysisTopline{display:none}
+/* Dans la feuille, le rapport ne doit pas empiler une deuxième barre
+   collante sous les onglets : son sommaire défile avec le contenu, et la
+   barre d'impression (inutile depuis une feuille) disparaît. */
+.isSheet .analystToc{position:static;top:auto}
+.isSheet .printToolbar{display:none}
+
+.analysisTabs button>i{margin-right:5px;margin-left:0}
+.analysisTabs button>i.tabDotWarn{width:6px;height:6px;background:#dba448}
+.tabCountTag{background:#eef3ef;color:#7d8b82}
+
+@media(max-width:760px){
+  .verdictCard{margin:11px 13px 10px;padding:12px}
+  .verdictTop{grid-template-columns:82px minmax(0,1fr);gap:11px}
+  .verdictScore>b{font-size:28px}
+  .verdictCopy h3{font-size:14px}
+  .verdictCopy p{font-size:10.5px}
+  .verdictBullets li{font-size:9px}
+  .keyFigures{grid-template-columns:repeat(2,minmax(0,1fr));margin:0 13px 9px}
+  .keyFigure{padding:9px 10px}
+  .keyFigure>b{font-size:14.5px}
+  .keyFigure>small{font-size:8.5px}
+  .confidenceNote{margin:0 13px 11px;font-size:9.5px}
+  .overviewSignals,.overviewFacts{margin:0 13px 10px;padding:10px 11px}
+  .overviewActions{margin:0 13px 9px}
+  .overviewActions button{padding:9px 8px}
+  .overviewActions b{font-size:10px}
+  .overviewActions small{font-size:8px}
+  .overviewMeta{margin:0 13px 9px}
+  .overviewFullPage{width:calc(100% - 26px);margin:0 13px 10px;min-height:42px}
+  .detailHead{padding:0 13px 10px}
+  .sheetMatchLine{padding:9px 12px}
+  .sheetMatchSide b{font-size:12.5px}
+}
+
+@media(max-width:380px){
+  .keyFigures{grid-template-columns:1fr}
+  .overviewActions{grid-template-columns:1fr}
+  .verdictTop{grid-template-columns:1fr}
+  .verdictScore{text-align:left;padding:9px 11px}
+  .verdictScore>b{display:inline-block;margin:0 6px 0 0;font-size:24px;vertical-align:-3px}
+  .verdictScore>em{margin-left:2px}
+}
+
+/* Repli quand l'analyse est indisponible : la feuille ne doit pas rester
+   un grand vide sous un message d'erreur. */
+.analysisFallback{padding:6px 19px 16px;color:#7b8780;font-size:11px;line-height:1.5}
+.analysisFallback button{display:block;width:100%;min-height:40px;margin-top:10px;border:1px solid #d4e7da;border-radius:9px;background:#f2f9f4;color:#2c6b45;font:600 11px 'DM Sans',sans-serif;cursor:pointer}
+@media(max-width:760px){.analysisFallback{padding:4px 13px 16px}}

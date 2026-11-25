@@ -609,6 +609,81 @@ console.log('\nÉtiquettes de match — contrôles\n');
   );
 }
 
+// ---------------------------------------------------------------------------
+// FEUILLE D'ANALYSE (ACCUEIL MOBILE) : un seul en-tête, pas de doublon
+// ---------------------------------------------------------------------------
+{
+  const homeSource = readFileSync(join(process.cwd(), 'app', 'page.tsx'), 'utf-8');
+  const panelSource = readFileSync(
+    join(process.cwd(), 'app', 'components', 'MatchAnalysisPanel.tsx'),
+    'utf-8'
+  );
+  const overviewSource = readFileSync(
+    join(process.cwd(), 'app', 'components', 'MatchOverview.tsx'),
+    'utf-8'
+  );
+  const probabilitiesSource = readFileSync(
+    join(process.cwd(), 'app', 'components', 'MatchProbabilities.tsx'),
+    'utf-8'
+  );
+  const css = readFileSync(join(process.cwd(), 'app', 'globals.css'), 'utf-8').replace(/\s+/g, '');
+
+  check(
+    'feuille : le panneau sait qu’il est dans une feuille',
+    homeSource.includes('sheetMode') && panelSource.includes('sheetMode?: boolean'),
+    'prop sheetMode'
+  );
+  // Régression vécue : la feuille empilait son en-tête, la barre de score
+  // et le titre du panneau — 163 px de chrome sur 793, trois fois le nom
+  // des équipes, et les onglets repoussés sous la ligne de flottaison.
+  check(
+    'feuille : la barre de score du panneau n’est pas répétée dans la feuille',
+    panelSource.includes('{fixture && !sheetMode && (') &&
+      panelSource.includes("className=\"sheetMatchLine\""),
+    'barre masquée, rappel compact à la place'
+  );
+  check(
+    'feuille : plus de titre de panneau dans la feuille (en-tête unique)',
+    css.includes('.isSheet.analysisTopline{display:none}'),
+    'règle .isSheet .analysisTopline'
+  );
+  check(
+    'feuille : la barre d’onglets tient sur cinq colonnes égales',
+    css.includes('.isSheet.analysisTabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))'),
+    'grille 5 colonnes'
+  );
+  check(
+    'feuille : le rapport ne colle pas un second sommaire sous les onglets',
+    css.includes('.isSheet.analystToc{position:static') && css.includes('.isSheet.printToolbar{display:none}'),
+    'sommaire statique, barre d’impression masquée'
+  );
+  check(
+    'feuille : l’aperçu ne duplique pas les cartes de probabilités',
+    overviewSource.length > 0 &&
+      !overviewSource.includes('predictionGrid') &&
+      probabilitiesSource.includes('predictionGrid'),
+    'grille partagée dans un composant dédié'
+  );
+  // Décision produit : la feuille ne met pas de score exact prédit en avant.
+  check(
+    'feuille : aucun score exact prédit dans l’aperçu (les λ, pas un score)',
+    overviewSource.includes('TOTAL DE BUTS ATTENDU') && !overviewSource.includes('topScores'),
+    'total attendu affiché'
+  );
+  check(
+    'feuille : un changement d’onglet ne laisse pas le titre sous la barre collante',
+    panelSource.includes("querySelector<HTMLElement>('.analysisSticky')") &&
+      panelSource.includes('scroller.scrollTop + delta - gap'),
+    'saut d’onglet tenant compte de la barre collante'
+  );
+  check(
+    'feuille : les actions de l’en-tête sont des icônes accessibles',
+    homeSource.includes('aria-label="Ouvrir la page dédiée de la rencontre"') &&
+      homeSource.includes('aria-label="Fermer l’analyse"'),
+    'libellés des deux boutons'
+  );
+}
+
 console.log('');
 if (failures) {
   console.log(`✗ ${failures} contrôle(s) en échec\n`);
