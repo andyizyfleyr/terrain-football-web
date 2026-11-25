@@ -676,6 +676,183 @@ async def fetch_day_all_leagues(
     }
 
 
+# --------------------------------------------------------------------------
+# Pronostics condensés (page « Pronostics »)
+# --------------------------------------------------------------------------
+
+# Champs du bloc `analyst` réellement affichés sur la page pronostics.
+# Le reste (modules, tactics, pronostics détaillés, h2h…) reste
+# disponible sur la fiche de match : le renvoyer ici multiplierait le
+# poids de la réponse sans être lu.
+def condense_prediction(match: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Réduit un match enrichi à ce qu'affiche la carte de pronostic.
+
+    Renvoie `None` quand le moteur n'a pas produit d'analyse : la page
+    distingue alors « pas de pronostic » de « pronostic sans cote ».
+    """
+    analyst = (match or {}).get("analyst") or {}
+    if not analyst:
+        return None
+
+    market = analyst.get("market") or {}
+    calibrated = market.get("calibrated") or {}
+    confidence = analyst.get("confidence") or {}
+    synthesis = analyst.get("synthesis") or {}
+    lambdas = analyst.get("lambdas") or {}
+    disclosure = analyst.get("disclosure") or {}
+    pronostics = analyst.get("pronostics") or {}
+
+    home = calibrated.get("home")
+    draw = calibrated.get("draw")
+    away = calibrated.get("away")
+    if not all(isinstance(v, (int, float)) for v in (home, draw, away)):
+        return None
+
+    # Issue retenue par le modèle : c'est elle que porte `confidence`.
+    pick = "home" if home >= max(draw, away) else ("away" if away >= draw else "draw")
+
+    return {
+        "matchId": match.get("id"),
+        "kickoff": match.get("date"),
+        "home": {
+            "name": (match.get("home") or {}).get("name", ""),
+            "short": (match.get("home") or {}).get("short", ""),
+            "logo": (match.get("home") or {}).get("logo", ""),
+        },
+        "away": {
+            "name": (match.get("away") or {}).get("name", ""),
+            "short": (match.get("away") or {}).get("short", ""),
+            "logo": (match.get("away") or {}).get("logo", ""),
+        },
+        "venue": match.get("venue") or "",
+        "probabilities": {"home": home, "draw": draw, "away": away},
+        # Distribution de la SIMULATION, distincte de la distribution
+        # CALIBRÉE ci-dessus : la confiance porte sur la première.
+        "simulation": {
+            "home": (analyst.get("sim") or {}).get("home"),
+            "draw": (analyst.get("sim") or {}).get("draw"),
+            "away": (analyst.get("sim") or {}).get("away"),
+        },
+        "pick": pick,
+        "confidence": {
+            "score": confidence.get("score"),
+            "label": confidence.get("label"),
+            # Issue sur laquelle portent `probability` et `interval` : la
+            # simulation, qui peut différer du maximum calibré.
+            "pickKey": confidence.get("pickKey") or pick,
+            "probability": confidence.get("probability"),
+            "interval": confidence.get("interval"),
+        },
+        "lambdas": {"home": lambdas.get("home"), "away": lambdas.get("away")},
+        "synthesis": {
+            "headline": synthesis.get("headline"),
+            "verdict": synthesis.get("verdict"),
+            "text": synthesis.get("text"),
+        },
+        "market": {
+            "available": bool(market.get("available")),
+            "odds": {
+                "home": (market.get("odds") or {}).get("home"),
+                "draw": (market.get("odds") or {}).get("draw"),
+                "away": (market.get("odds") or {}).get("away"),
+            },
+            "edge": (market.get("value") or {}).get("edge"),
+            "valuePick": (market.get("value") or {}).get("pick"),
+        },
+        "disclosure": {
+            "verdict": disclosure.get("verdict"),
+            "headline": disclosure.get("headline"),
+        },
+        # Le nombre de marchés dérivés est un argument de profondeur :
+        # il est calculé, pas décoratif.
+        "derivedMarkets": sum(
+            1
+            for value in (pronostics.get("halves"), pronostics.get("teamGoals"))
+            if value
+        ),
+    }
+
+
+async def fetch_day_predictions(
+    client: httpx.AsyncClient,
+    date_compact: str,
+    leagues: Optional[List[str]] = None,
+    limit: int = 40,
+) -> Dict[str, Any]:
+    """Pronostics d'une journée, toutes compétitions confondues.
+
+    Ne rapatrie QUE les matchs à venir : un pronostic sur une rencontre
+    déjà jouée n'a aucun intérêt pour l'utilisateur (et le moteur ne
+    produit de toute façon rien sans cote).
+
+    Le tri est celui de la confiance décroissante : la page met en avant
+    les rencontres où le modèle a le plus de prise, pas celles qui ont
+    le plus gros enjeu marketing.
+    """
+    slugs = leagues or [item["slug"] for item in LEAGUE_CATALOG]
+
+    async def one(slug: str) -> Tuple[str, Optional[Dict[str, Any]], str]:
+        try:
+            base = await build_base_matches(slug, date_compact, None)
+        except Exception:
+            return slug, None, "ingestion"
+        if not base:
+            return slug, None, "empty"
+        return slug, base, "ok"
+
+    gathered = await asyncio.gather(*(one(slug) for slug in slugs))
+
+    predictions: List[Dict[str, Any]] = []
+    failed: List[str] = []
+    without_analysis = 0
+    for slug, base, status in gathered:
+        if status == "ingestion":
+            failed.append(slug)
+            continue
+        if not base:
+            continue
+        meta = league_meta(slug)
+        # Le moteur vit dans l'application web : on l'appelle depuis la
+        # même fabrique que `/api/analyze`, seule garante du contrat.
+        from main import call_analysis_service  # import tardif : evite le cycle
+
+        analysis, _error = await call_analysis_service(client, slug, date_compact, base)
+        matches = (analysis or {}).get("matches") or []
+        for match in matches:
+            condensed = condense_prediction(match)
+            if condensed is None:
+                without_analysis += 1
+                continue
+            predictions.append(
+                {
+                    **condensed,
+                    "league": slug,
+                    "leagueName": meta.get("name", slug),
+                    "leagueCountry": meta.get("country", ""),
+                }
+            )
+
+    predictions.sort(
+        key=lambda item: (
+            -(item.get("confidence", {}).get("score") or 0),
+            item.get("kickoff") or "",
+        )
+    )
+    total = len(predictions)
+    if limit:
+        predictions = predictions[:limit]
+
+    return {
+        "date": date_compact,
+        "predictions": predictions,
+        "total": total,
+        "shown": len(predictions),
+        "withoutAnalysis": without_analysis,
+        "failed": failed,
+        "leagues": [league_meta(slug) for slug in slugs],
+    }
+
+
 # Forme récente (schedule d'équipe)
 # --------------------------------------------------------------------------
 

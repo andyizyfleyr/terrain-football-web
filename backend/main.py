@@ -48,6 +48,7 @@ from espn import (  # noqa: E402
     compact_date,
     fetch_day_all_leagues,
     fetch_day_fixtures,
+    fetch_day_predictions,
     parse_iso,
 )
 
@@ -204,6 +205,36 @@ async def fixtures_all(
 
     async with _client() as client:
         payload = await fetch_day_all_leagues(client, date_compact, wanted)
+    return JSONResponse(payload)
+
+
+@app.get("/api/predictions")
+async def predictions(
+    date: str = Query(""),
+    leagues: str = Query("", description="Slugs separes par des virgules (defaut : tout le catalogue)"),
+    limit: int = Query(40, ge=0, le=100),
+) -> JSONResponse:
+    """Pronostics d'une journee, toutes competitions du catalogue.
+
+    Sert la page « Pronostics » : le moteur produit sur chaque rencontre
+    une distribution 1X2, un score de confiance MESURE, une synthese et
+    un verdict de transparence. Cette route ne renvoie que ce sous-ensemble
+    — le reste (modules, tactique, marches derives) reste sur la fiche de
+    match, sinon la reponse peserait plusieurs centaines de Ko.
+
+    Une competition dont l'ingestion echoue est listee dans `failed` ;
+    elle n'annule pas la reponse.
+    """
+    date_compact = _normalize_date(date)
+    if leagues.strip():
+        wanted = [slug.strip() for slug in leagues.split(",") if slug.strip()]
+        known = {item["slug"] for item in LEAGUE_CATALOG}
+        wanted = [slug for slug in wanted if slug in known]
+    else:
+        wanted = [item["slug"] for item in LEAGUE_CATALOG]
+
+    async with _client(timeout=ENGINE_TIMEOUT) as client:
+        payload = await fetch_day_predictions(client, date_compact, wanted, limit)
     return JSONResponse(payload)
 
 

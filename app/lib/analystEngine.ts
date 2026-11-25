@@ -320,6 +320,14 @@ export type AnalystReport = {
     completeness: number;
     separation: number;
     agreement: number;
+    /**
+     * Issue retenue par la SIMULATION, celle sur laquelle portent
+     * `probability` et `interval`. Elle peut différer de l'issue la plus
+     * probable de la distribution calibrée (le marché peut renverser
+     * l'ordre) : sans ce champ, une interface affichant les probabilités
+     * calibrées attribuerait la confiance à la mauvaise issue.
+     */
+    pickKey: 'home' | 'draw' | 'away';
     /** Probabilité MESURÉE que l'issue retenue par le modèle soit la bonne. */
     probability: number;
     /** Intervalle de crédibilité 80 % autour de cette probabilité. */
@@ -2643,6 +2651,7 @@ export function runQuantitativeAnalyst(input: AnalystInput): AnalystReport {
       completeness: round(completeness, 3),
       separation: round(separation, 3),
       agreement: round(agreement, 3),
+      pickKey: simRanked[0].key as 'home' | 'draw' | 'away',
       probability: calibratedConfidenceValue.probability,
       interval: {
         low: round(confidenceInterval.low, 4),

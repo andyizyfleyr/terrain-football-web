@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MatchAnalysisPanel } from './components/MatchAnalysisPanel';
 import { apiFetch, type ClientError } from './lib/clientApi';
 import { MatchCard } from './components/MatchCard';
+import ScoreTicker from './components/ScoreTicker';
 import { SiteFooter, SiteHeader } from './components/SiteHeader';
 import { MATCH_TAG_CONFIG, MATCH_TAG_LABELS, type MatchTag, type MatchTagId } from './lib/matchTags';
 import {
@@ -527,9 +528,13 @@ export default function Home() {
         items={[
           { kind: 'anchor', href: '#rencontres', label: 'Rencontres', active: true },
           { kind: 'link', href: '/matchs', label: 'Tous les matchs' },
+          { kind: 'link', href: '/pronostics', label: 'Pronostics' },
         ]}
         quickAction={{ href: '/matchs', label: 'Tous les matchs →' }}
       />
+
+      {/* Bandeau collant : scores du jour, toutes compétitions. */}
+      <ScoreTicker />
 
       <section className="appHero" id="top">
         <div className="heroCopy">
